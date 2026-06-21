@@ -1,0 +1,35 @@
+{
+    "name": "detain/phlix-plugin-lastfm",
+    "type": "phlix-plugin",
+    "description": "Last.fm scrobbler plugin for Phlix — scrobbles music playback to Last.fm.",
+    "license": "MIT",
+    "keywords": ["phlix", "phlix-plugin", "scrobbler", "lastfm", "scrobbling", "music"],
+    "homepage": "https://github.com/detain/phlix-plugin-lastfm",
+    "require": {
+        "php": ">=8.3",
+        "psr/container": "^1.1 || ^2.0",
+        "psr/log": "^1.0 || ^2.0 || ^3.0",
+        "workerman/mysql": "^1.0",
+        "detain/phlix-shared": "^0.9"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.0"
+    },
+    "repositories": [
+        { "type": "vcs", "url": "https://github.com/detain/phlix-shared.git" }
+    ],
+    "autoload": {
+        "psr-4": {
+            "Phlix\\Plugins\\Scrobbler\\Lastfm\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Phlix\\Tests\\Unit\\Plugins\\Scrobbler\\Lastfm\\": "tests/Unit/"
+        }
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true
+    }
+}

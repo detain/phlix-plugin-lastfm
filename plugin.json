@@ -1,0 +1,39 @@
+{
+    "name": "phlix-plugin-lastfm",
+    "version": "1.0.0",
+    "phlix_min_server_version": "0.15.0",
+    "type": "scrobbler",
+    "entry": "Phlix\\Plugins\\Scrobbler\\Lastfm\\LastfmPlugin",
+    "events": [
+        "phlix.playback.started",
+        "phlix.playback.stopped"
+    ],
+    "settings": {
+        "enabled": {
+            "type": "boolean",
+            "default": false,
+            "description": "Enable Last.fm scrobbling"
+        },
+        "api_key": {
+            "type": "string",
+            "default": "",
+            "description": "Last.fm API key"
+        },
+        "shared_secret": {
+            "type": "string",
+            "default": "",
+            "secret": true,
+            "description": "Last.fm shared secret"
+        },
+        "callback_url": {
+            "type": "string",
+            "default": "",
+            "description": "OAuth callback URL"
+        },
+        "username": {
+            "type": "string",
+            "default": "",
+            "description": "Last.fm username (display only)"
+        }
+    }
+}
