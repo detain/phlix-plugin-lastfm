@@ -231,8 +231,8 @@ class LastfmApi
         ];
 
         $result = ($this->http)(self::API_ROOT, $body, $headers);
-        $status = $result['status'] ?? 0;
-        $payload = $result['body'] ?? '';
+        $status = $result['status'];
+        $payload = $result['body'];
 
         if ($status < 200 || $status >= 300) {
             $this->logger->warning('Last.fm API returned non-2xx', [
@@ -283,8 +283,8 @@ class LastfmApi
                 ],
             ]);
             $response = @file_get_contents($url, false, $context);
-            $statusLine = isset($http_response_header[0]) && is_string($http_response_header[0])
-                ? $http_response_header[0]
+            $statusLine = isset($http_response_header[0])
+                ? (string) $http_response_header[0]
                 : '';
             $status = 0;
             if ($statusLine !== '' && preg_match('#HTTP/\S+\s+(\d{3})#', $statusLine, $m) === 1) {

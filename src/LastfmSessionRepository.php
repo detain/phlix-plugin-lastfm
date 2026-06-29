@@ -68,15 +68,17 @@ class LastfmSessionRepository
      *
      * @param string $userId     Phlix user UUID.
      * @param string $sessionKey Session key returned by `auth.getSession`.
+     * @param string $username   Last.fm username (for display purposes).
      */
-    public function save(string $userId, string $sessionKey): void
+    public function save(string $userId, string $sessionKey, string $username = ''): void
     {
         $this->db->query(
-            'INSERT INTO lastfm_sessions (user_id, session_key, connected_at)
-             VALUES (?, ?, NOW())
+            'INSERT INTO lastfm_sessions (user_id, session_key, username, connected_at)
+             VALUES (?, ?, ?, NOW())
              ON DUPLICATE KEY UPDATE session_key = VALUES(session_key),
+                                     username    = VALUES(username),
                                      connected_at = VALUES(connected_at)',
-            [$userId, $sessionKey]
+            [$userId, $sessionKey, $username]
         );
     }
 

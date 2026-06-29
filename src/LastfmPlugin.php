@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Phlix\Plugins\Scrobbler\Lastfm;
 
+use Phlix\Media\Library\ItemRepository;
+use Phlix\Plugins\Scrobbler\Lastfm\Database\LastfmMigrationRunner;
 use Phlix\Shared\Events\Playback\PlaybackStarted;
 use Phlix\Shared\Events\Playback\PlaybackStopped;
 use Phlix\Shared\Plugin\LifecycleInterface;
@@ -58,6 +60,10 @@ final class LastfmPlugin implements LifecycleInterface
      */
     public function onEnable(ContainerInterface $container): void
     {
+        // 1. Run pending migrations so the lastfm_sessions table exists before
+        //    we try to resolve or use LastfmSessionRepository.
+        $this->runMigrations($container);
+
         if (!$this->config->isUsable()) {
             $this->logger->debug('Last.fm plugin not enabled: config incomplete or disabled');
             return;
@@ -147,6 +153,31 @@ final class LastfmPlugin implements LifecycleInterface
     }
 
     /**
+     * Run any pending Last.fm plugin database migrations.
+     *
+     * Attempts to resolve a {@see LastfmMigrationRunner} from the container
+     * and calls {@see LastfmMigrationRunner::run()}. If the runner is not
+     * registered in the container (e.g. in test environments), the plugin
+     * logs a debug message and continues — the host is responsible for
+     * ensuring the table exists before using the repository.
+     */
+    private function runMigrations(ContainerInterface $container): void
+    {
+        if (!$container->has(LastfmMigrationRunner::class)) {
+            $this->logger->debug('Last.fm migration runner not registered in container, skipping');
+            return;
+        }
+        try {
+            /** @var LastfmMigrationRunner $runner */
+            $runner = $container->get(LastfmMigrationRunner::class);
+            $runner->run();
+            $this->logger->debug('Last.fm migrations completed');
+        } catch (\Throwable $e) {
+            $this->logger->warning('Last.fm migration runner threw', ['error' => $e->getMessage()]);
+        }
+    }
+
+    /**
      * Build the track-metadata resolver. We deliberately do not require
      * a hard dependency on `ItemRepository` so plugin tests can stub it.
      *
@@ -156,11 +187,11 @@ final class LastfmPlugin implements LifecycleInterface
     {
         try {
             /** @var mixed $repoRaw */
-            $repoRaw = $container->get(\Phlix\Media\Library\ItemRepository::class);
+            $repoRaw = $container->get(ItemRepository::class);
         } catch (\Throwable) {
             $repoRaw = null;
         }
-        if (!$repoRaw instanceof \Phlix\Media\Library\ItemRepository) {
+        if (!$repoRaw instanceof ItemRepository) {
             return static fn (string $_id) => null;
         }
         $repo = $repoRaw;
