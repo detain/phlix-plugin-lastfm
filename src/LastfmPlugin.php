@@ -240,19 +240,26 @@ final class LastfmPlugin implements LifecycleInterface
             return \Phlix\Plugins\Scrobbler\Lastfm\LastfmApi::defaultHttp();
         }
 
-        /** @var \Workerman\Http\Client $client */
-        $client = new \Workerman\Http\Client();
         // 3-second connect timeout, 10-second transfer timeout — keeps things snappy.
         // TLS verification is ON by default (do not disable peer/host verification).
-        $client->timeout = 10;
-        $client->connectTimeout = 3;
+        /** @var \Workerman\Http\Client $client */
+        $client = new \Workerman\Http\Client([
+            'timeout'         => 10,
+            'connect_timeout' => 3,
+        ]);
 
         return static function (string $url, string $body, array $headers) use ($client): array {
             try {
-                /** @var \React\Promise\PromiseInterface $promise */
-                $promise = $client->post($url, $body, $headers);
-                /** @var \Workerman\Http\Response $response */
-                $response = $promise->wait();
+                $response = $client->request($url, [
+                    'method'  => 'POST',
+                    'data'    => $body,
+                    'headers' => $headers,
+                ]);
+
+                if (!$response instanceof \Workerman\Http\Response) {
+                    return ['status' => 0, 'body' => ''];
+                }
+
                 return [
                     'status' => $response->getStatusCode(),
                     'body'   => $response->getBody()->getContents(),

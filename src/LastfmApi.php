@@ -267,7 +267,7 @@ class LastfmApi
      *
      * @return callable(string $url, string $body, array<string, string> $headers): array{status: int, body: string}
      */
-    private static function defaultHttp(): callable
+    public static function defaultHttp(): callable
     {
         return static function (string $url, string $body, array $headers): array {
             $headerLines = '';
