@@ -205,7 +205,7 @@ final class LastfmPlugin implements LifecycleInterface
     private function createAsyncHttpRunner(): callable
     {
         if (!class_exists(\Workerman\Http\Client::class)) {
-            $this->logger->debug('Last.fm: workerman/http-client not available, using sync fallback');
+            $this->logger->warning('Last.fm: workerman/http-client not available, using sync fallback');
             return \Phlix\Plugins\Scrobbler\Lastfm\LastfmApi::defaultHttp();
         }
 
@@ -217,29 +217,20 @@ final class LastfmPlugin implements LifecycleInterface
         $client->connectTimeout = 3;
 
         return static function (string $url, string $body, array $headers) use ($client): array {
-            $result = ['status' => 0, 'body' => ''];
-
             try {
-                $client->post(
-                    $url,
-                    $body,
-                    $headers,
-                    static function ($response) use (&$result): void {
-                        $result['status'] = $response->getStatusCode();
-                        $result['body'] = $response->getBody()->getContents();
-                    },
-                    static function (\Throwable $e) use (&$result): void {
-                        // Transport error — leave status=0 so caller receives
-                        // a distinguishable failure rather than a silent null.
-                        $result = ['status' => 0, 'body' => ''];
-                    }
-                );
-            } catch (\Throwable $e) {
-                // Client method threw synchronously (e.g., invalid URL).
-                $result = ['status' => 0, 'body' => ''];
+                /** @var \React\Promise\PromiseInterface $promise */
+                $promise = $client->post($url, $body, $headers);
+                /** @var \Workerman\Http\Response $response */
+                $response = $promise->wait();
+                return [
+                    'status' => $response->getStatusCode(),
+                    'body'   => $response->getBody()->getContents(),
+                ];
+            } catch (\Throwable) {
+                // Transport or DNS error — return distinguishable zero-status
+                // failure so caller treats it the same as a network-level error.
+                return ['status' => 0, 'body' => ''];
             }
-
-            return $result;
         };
     }
 }
