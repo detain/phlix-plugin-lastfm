@@ -24,9 +24,11 @@ use Psr\Log\NullLogger;
  * string becomes the `api_sig` parameter. See the worked example in
  * {@see self::buildApiSig()}'s tests.
  *
- * The class is intentionally framework-agnostic — it talks HTTPS via
- * `file_get_contents` so test doubles can swap in a custom HTTP runner
- * without dragging cURL in.
+ * The class is intentionally framework-agnostic — it uses a pluggable
+ * HTTP runner callable so test doubles can swap in a custom implementation
+ * without dragging cURL in. The default runner uses `file_get_contents`;
+ * production Workerman deployments should inject an async runner such as
+ * `workerman/http-client`.
  *
  * @package Phlix\Plugins\Scrobbler\Lastfm
  * @since 0.15.0
@@ -254,6 +256,15 @@ class LastfmApi
      * Default HTTP runner using PHP streams. Tests can override via the
      * constructor's `$http` parameter.
      *
+     * NOTE: This is a **synchronous, blocking** runner. It is NOT safe for
+     * use inside a Workerman/event-loop worker — use an async runner
+     * (e.g. workerman/http-client) in production. This default exists
+     * for CLI scripts and unit tests only.
+     *
+     * Transport errors (DNS failure, connection refused, timeout) result in
+     * a zero-status response so the caller can distinguish them from 2xx
+     * responses via the status code.
+     *
      * @return callable(string $url, string $body, array<string, string> $headers): array{status: int, body: string}
      */
     private static function defaultHttp(): callable
@@ -269,7 +280,6 @@ class LastfmApi
                     'header'  => $headerLines,
                     'content' => $body,
                     'timeout' => 10,
-                    'ignore_errors' => true,
                 ],
             ]);
             $response = @file_get_contents($url, false, $context);

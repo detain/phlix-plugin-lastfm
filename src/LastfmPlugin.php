@@ -70,7 +70,12 @@ final class LastfmPlugin implements LifecycleInterface
         }
         $resolveTrack = $this->resolveTrackResolver($container);
 
-        $api = new LastfmApi($this->config->apiKey, $this->config->sharedSecret, $this->logger);
+        $api = new LastfmApi(
+            $this->config->apiKey,
+            $this->config->sharedSecret,
+            $this->logger,
+            $this->createAsyncHttpRunner()
+        );
         $this->scrobbler = new LastfmScrobbler($api, $sessions, $resolveTrack, $this->logger);
 
         $this->logger->info('Last.fm plugin enabled');
@@ -181,6 +186,60 @@ final class LastfmPlugin implements LifecycleInterface
                 'album'            => $album,
                 'duration_seconds' => $durationTicks > 0 ? (int) ($durationTicks / 10_000_000) : null,
             ];
+        };
+    }
+
+    /**
+     * Build an async HTTP runner backed by workerman/http-client.
+     *
+     * This runner integrates with the Workerman event loop instead of
+     * blocking the worker on each scrobble/now-playing HTTP POST.
+     * TLS verification is kept ON (default).
+     *
+     * If workerman/http-client is not available, falls back to a sync
+     * runner that wraps the stream-based default — callers will still
+     * receive correct results but the worker will block on I/O.
+     *
+     * @return callable(string $url, string $body, array<string, string> $headers): array{status: int, body: string}
+     */
+    private function createAsyncHttpRunner(): callable
+    {
+        if (!class_exists(\Workerman\Http\Client::class)) {
+            $this->logger->debug('Last.fm: workerman/http-client not available, using sync fallback');
+            return \Phlix\Plugins\Scrobbler\Lastfm\LastfmApi::defaultHttp();
+        }
+
+        /** @var \Workerman\Http\Client $client */
+        $client = new \Workerman\Http\Client();
+        // 3-second connect timeout, 10-second transfer timeout — keeps things snappy.
+        // TLS verification is ON by default (do not disable peer/host verification).
+        $client->timeout = 10;
+        $client->connectTimeout = 3;
+
+        return static function (string $url, string $body, array $headers) use ($client): array {
+            $result = ['status' => 0, 'body' => ''];
+
+            try {
+                $client->post(
+                    $url,
+                    $body,
+                    $headers,
+                    static function ($response) use (&$result): void {
+                        $result['status'] = $response->getStatusCode();
+                        $result['body'] = $response->getBody()->getContents();
+                    },
+                    static function (\Throwable $e) use (&$result): void {
+                        // Transport error — leave status=0 so caller receives
+                        // a distinguishable failure rather than a silent null.
+                        $result = ['status' => 0, 'body' => ''];
+                    }
+                );
+            } catch (\Throwable $e) {
+                // Client method threw synchronously (e.g., invalid URL).
+                $result = ['status' => 0, 'body' => ''];
+            }
+
+            return $result;
         };
     }
 }

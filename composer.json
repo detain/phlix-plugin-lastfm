@@ -12,6 +12,9 @@
         "workerman/mysql": "^1.0",
         "detain/phlix-shared": "^0.9"
     },
+    "suggest": {
+        "workerman/http-client": "Async HTTP client for Workerman — use with LastfmPlugin to avoid blocking file_get_contents on scrobble/now-playing calls."
+    },
     "require-dev": {
         "phpunit/phpunit": "^10.0"
     },
