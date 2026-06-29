@@ -64,10 +64,22 @@ final class LastfmSessionRepositoryTest extends TestCase
             ->method('query')
             ->with(
                 self::stringContains('ON DUPLICATE KEY UPDATE'),
-                ['user-1', 'SK'],
+                ['user-1', 'SK', ''],
             )
             ->willReturn([]);
         $this->repo->save('user-1', 'SK');
+    }
+
+    public function testSaveWithUsernameIssuesUpsert(): void
+    {
+        $this->db->expects(self::once())
+            ->method('query')
+            ->with(
+                self::stringContains('ON DUPLICATE KEY UPDATE'),
+                ['user-1', 'SK', 'rj'],
+            )
+            ->willReturn([]);
+        $this->repo->save('user-1', 'SK', 'rj');
     }
 
     public function testDeleteIssuesDelete(): void

@@ -16,7 +16,10 @@
         "workerman/http-client": "Async HTTP client for Workerman — use with LastfmPlugin to avoid blocking file_get_contents on scrobble/now-playing calls."
     },
     "require-dev": {
-        "phpunit/phpunit": "^10.0"
+        "phpstan/phpstan": "^2.2",
+        "phpstan/phpstan-phpunit": "^2.0",
+        "phpunit/phpunit": "^10.0",
+        "react/promise": "^3.3"
     },
     "repositories": [
         { "type": "vcs", "url": "https://github.com/detain/phlix-shared.git" }
@@ -28,7 +31,8 @@
     },
     "autoload-dev": {
         "psr-4": {
-            "Phlix\\Tests\\Unit\\Plugins\\Scrobbler\\Lastfm\\": "tests/Unit/"
+            "Phlix\\Tests\\Unit\\Plugins\\Scrobbler\\Lastfm\\": "tests/Unit/",
+            "Phlix\\Tests\\Unit\\Plugins\\Scrobbler\\Lastfm\\Support\\": "tests/Unit/Plugins/Scrobbler/Lastfm/Support/"
         }
     },
     "config": {
