@@ -10,7 +10,7 @@
         "psr/container": "^1.1 || ^2.0",
         "psr/log": "^1.0 || ^2.0 || ^3.0",
         "workerman/mysql": "^1.0",
-        "detain/phlix-shared": "^0.9"
+        "detain/phlix-shared": "^0.11.0"
     },
     "suggest": {
         "workerman/http-client": "Async HTTP client for Workerman — use with LastfmPlugin to avoid blocking file_get_contents on scrobble/now-playing calls."
