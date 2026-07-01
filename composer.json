@@ -7,7 +7,7 @@
     "homepage": "https://github.com/detain/phlix-plugin-lastfm",
     "require": {
         "php": ">=8.3",
-        "detain/phlix-shared": "^0.12.0",
+        "detain/phlix-shared": "^0.15.0",
         "psr/container": "^1.1 || ^2.0",
         "psr/log": "^1.0 || ^2.0 || ^3.0",
         "workerman/mysql": "^1.0"
@@ -22,9 +22,6 @@
         "react/promise": "^3.3",
         "workerman/http-client": "^3.1"
     },
-    "repositories": [
-        { "type": "vcs", "url": "https://github.com/detain/phlix-shared.git" }
-    ],
     "autoload": {
         "psr-4": {
             "Phlix\\Plugins\\Scrobbler\\Lastfm\\": "src/"
