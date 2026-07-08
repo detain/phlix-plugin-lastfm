@@ -1,5 +1,12 @@
 <?php
 
+/**
+ * Database::Migrations::MigrationInterface.
+ *
+ * @copyright 2026 Joe Huss <detain@interserver.net>
+ * @license   MIT
+ */
+
 declare(strict_types=1);
 
 namespace Phlix\Plugins\Scrobbler\Lastfm\Database\Migrations;

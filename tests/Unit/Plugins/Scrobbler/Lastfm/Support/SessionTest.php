@@ -1,5 +1,12 @@
 <?php
 
+/**
+ * Unit::Plugins::Scrobbler::Lastfm::Support::SessionTest.
+ *
+ * @copyright 2026 Joe Huss <detain@interserver.net>
+ * @license   MIT
+ */
+
 declare(strict_types=1);
 
 namespace Phlix\Tests\Unit\Plugins\Scrobbler\Lastfm;
