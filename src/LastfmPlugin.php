@@ -15,6 +15,7 @@ use Phlix\Media\Library\ItemRepository;
 use Phlix\Plugins\Scrobbler\Lastfm\Database\LastfmMigrationRunner;
 use Phlix\Shared\Events\Playback\PlaybackStarted;
 use Phlix\Shared\Events\Playback\PlaybackStopped;
+use Phlix\Shared\Plugin\ConfigurableInterface;
 use Phlix\Shared\Plugin\LifecycleInterface;
 use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
@@ -33,23 +34,46 @@ use Psr\Log\NullLogger;
  * @package Phlix\Plugins\Scrobbler\Lastfm
  * @since 0.15.0
  */
-final class LastfmPlugin implements LifecycleInterface
+final class LastfmPlugin implements LifecycleInterface, ConfigurableInterface
 {
     public const PLUGIN_TYPE = 'scrobbler';
     public const PLUGIN_NAME = 'lastfm';
 
     private ?LastfmScrobbler $scrobbler = null;
     private LoggerInterface $logger;
+    private LastfmConfig $config;
 
     /**
-     * @param LastfmConfig         $config Wraps `config/lastfm.php`.
+     * The constructor MUST stay autowirable — the host loader instantiates the
+     * entry class through its PSR-11 container, which cannot build a
+     * {@see LastfmConfig} (its `apiKey`/`sharedSecret` are required, un-guessable
+     * values). So the config defaults to an empty/disabled one here and the real
+     * settings arrive via {@see self::configure()} before `onEnable()`.
+     *
+     * @param LastfmConfig|null    $config Optional pre-built config (tests inject one).
      * @param LoggerInterface|null $logger Optional PSR-3 logger.
      */
     public function __construct(
-        private readonly LastfmConfig $config,
+        ?LastfmConfig $config = null,
         ?LoggerInterface $logger = null,
     ) {
+        $this->config = $config ?? LastfmConfig::fromArray([]);
         $this->logger = $logger ?? new NullLogger();
+    }
+
+    /**
+     * Receive the plugin's persisted settings from the host.
+     *
+     * Called once by the loader between construction and {@see self::onEnable()},
+     * so `onEnable()` sees the configured `api_key`/`shared_secret`/etc.
+     *
+     * @param array<string, mixed> $settings Persisted settings (the manifest's
+     *        `settings` key-set: `enabled`, `api_key`, `shared_secret`,
+     *        `callback_url`, `username`).
+     */
+    public function configure(array $settings): void
+    {
+        $this->config = LastfmConfig::fromArray($settings);
     }
 
     /**

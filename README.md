@@ -36,13 +36,22 @@ php bin/phlix plugin:install https://github.com/detain/phlix-plugin-lastfm
 
 ## Settings
 
-| Setting | Type | Description |
-|---|---|---|
-| `enabled` | bool | Enable Last.fm scrobbling. |
-| `api_key` | string | Your Last.fm API key. |
-| `shared_secret` | string | Your Last.fm shared secret (used to sign requests). |
-| `callback_url` | string | OAuth callback URL the user returns to after approving access. |
-| `username` | string | Your Last.fm username (display only). |
+Configure these in the Phlix admin **Plugins → Configure** dialog.
+
+| Setting | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `enabled` | bool | no | `false` | Master on/off for Last.fm scrobbling. |
+| `api_key` | string | **yes** | — | Your Last.fm API key. Create a free API account at [last.fm/api/account/create](https://www.last.fm/api/account/create). |
+| `shared_secret` | string (secret) | **yes** | — | The "Shared secret" shown next to your API key on your [Last.fm API accounts](https://www.last.fm/api/accounts) page. Used to sign authenticated requests. |
+| `callback_url` | string | no | server URL | The Callback URL you registered for your Last.fm API application (OAuth handshake). |
+| `username` | string | no | — | Display-only: the Last.fm account scrobbles are sent to (set during authorization). |
+
+### Where to get your credentials
+
+1. Sign in to Last.fm and open [**Create an API account**](https://www.last.fm/api/account/create).
+2. Fill in the application name/description; the **Callback URL** should point back at your Phlix server.
+3. Copy the **API key** into `api_key` and the **Shared secret** into `shared_secret`.
+4. Enable the plugin and toggle `enabled` on.
 
 ## Development
 
