@@ -59,21 +59,62 @@ class LastfmScrobbler
     private $resolveTrack;
 
     /**
+     * Deferred, idempotent schema-ensure hook — runs the plugin's DB
+     * migrations lazily on **first actual event**, NOT at boot/enable.
+     *
+     * This is the boot-safety split: {@see LastfmPlugin::onEnable()} does
+     * zero I/O (no migrations, no queries, no network); the first playback
+     * event that reaches this scrobbler triggers `CREATE TABLE IF NOT
+     * EXISTS` exactly once per instance via {@see self::ensureSchema()}.
+     *
+     * @var (callable(): void)|null
+     */
+    private $ensureSchema;
+
+    /** One-shot guard so the deferred schema-ensure runs at most once. */
+    private bool $schemaEnsured = false;
+
+    /**
      * @param LastfmApi               $api          Last.fm HTTP client.
      * @param LastfmSessionRepository $sessions     Per-user session-key store.
      * @param callable(string): ?array{
      *     title: string, artist: string, album: ?string, duration_seconds: ?int
      * } $resolveTrack Resolver that maps a `mediaItemId` to track metadata.
      * @param LoggerInterface|null    $logger       Optional PSR-3 logger.
+     * @param (callable(): void)|null $ensureSchema Deferred, idempotent
+     *        schema-ensure hook invoked lazily on the first event (see
+     *        {@see self::$ensureSchema}). Null = schema managed elsewhere.
      */
     public function __construct(
         private readonly LastfmApi $api,
         private readonly LastfmSessionRepository $sessions,
         callable $resolveTrack,
         ?LoggerInterface $logger = null,
+        ?callable $ensureSchema = null,
     ) {
         $this->resolveTrack = $resolveTrack;
         $this->logger = $logger ?? new NullLogger();
+        $this->ensureSchema = $ensureSchema;
+    }
+
+    /**
+     * Run the deferred schema-ensure hook exactly once, on first use.
+     *
+     * Called at the top of each event handler BEFORE any DB access. The
+     * one-shot guard ({@see self::$schemaEnsured}) makes repeated calls a
+     * no-op, so a busy worker triggers the (idempotent) migration only on
+     * the first playback event it processes — never at boot, never per
+     * event.
+     */
+    private function ensureSchema(): void
+    {
+        if ($this->schemaEnsured) {
+            return;
+        }
+        $this->schemaEnsured = true;
+        if ($this->ensureSchema !== null) {
+            ($this->ensureSchema)();
+        }
     }
 
     /**
@@ -82,6 +123,7 @@ class LastfmScrobbler
      */
     public function onPlaybackStarted(PlaybackStarted $event): void
     {
+        $this->ensureSchema();
         $session = $this->sessions->findByUserId($event->userId);
         if ($session === null) {
             return;
@@ -107,6 +149,7 @@ class LastfmScrobbler
      */
     public function onPlaybackStopped(PlaybackStopped $event): void
     {
+        $this->ensureSchema();
         $session = $this->sessions->findByUserId($event->userId);
         if ($session === null) {
             return;

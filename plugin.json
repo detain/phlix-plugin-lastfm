@@ -40,14 +40,7 @@
             "default": "",
             "required": false,
             "label": "OAuth Callback URL",
-            "description": "The Callback URL you registered for your Last.fm API application, used for the authorization handshake. Optional — defaults to this server."
-        },
-        "username": {
-            "type": "string",
-            "default": "",
-            "required": false,
-            "label": "Last.fm Username",
-            "description": "Display-only: the Last.fm account scrobbles are sent to (set during authorization)."
+            "description": "The Callback URL you registered for your Last.fm API application, used by the authorization callback route. Optional — defaults to /auth/lastfm/callback on this server."
         }
     }
 }

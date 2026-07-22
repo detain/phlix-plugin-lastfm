@@ -69,7 +69,7 @@ final class LastfmPlugin implements LifecycleInterface, ConfigurableInterface
      *
      * @param array<string, mixed> $settings Persisted settings (the manifest's
      *        `settings` key-set: `enabled`, `api_key`, `shared_secret`,
-     *        `callback_url`, `username`).
+     *        `callback_url`).
      */
     public function configure(array $settings): void
     {
@@ -77,13 +77,19 @@ final class LastfmPlugin implements LifecycleInterface, ConfigurableInterface
     }
 
     /**
-     * Resolves dependencies and registers the scrobbler with the
-     * dispatcher.
+     * WIRE step (boot-safe): construct + subscribe ONLY. NO migrations, NO
+     * DB queries, NO network — this runs across every worker at boot and
+     * MUST never block or throw (the item-5c3 landmine).
      *
-     * Resolution graph:
-     *   - {@see LastfmApi} (constructed inline from config + container logger)
-     *   - {@see LastfmSessionRepository} (from container — DB-backed)
-     *   - track-resolver callable (closure over `ItemRepository`)
+     * Resolution graph (all lazy/construct-only):
+     *   - {@see LastfmApi} (constructed inline from config + async runner)
+     *   - {@see LastfmSessionRepository} (resolved from container — the
+     *     container just *constructs* it; no query is issued here)
+     *   - track-resolver callable (a closure over `ItemRepository`; the
+     *     `findById` lookup is deferred until an event fires)
+     *   - deferred schema-ensure hook (see {@see self::makeSchemaEnsurer()})
+     *     — the DB migration runs lazily on the FIRST playback event, not
+     *     here at boot.
      *
      * Throws nothing — when config is unusable the plugin simply records
      * a debug log line and bails. The loader treats that as a no-op
@@ -91,10 +97,6 @@ final class LastfmPlugin implements LifecycleInterface, ConfigurableInterface
      */
     public function onEnable(ContainerInterface $container): void
     {
-        // 1. Run pending migrations so the lastfm_sessions table exists before
-        //    we try to resolve or use LastfmSessionRepository.
-        $this->runMigrations($container);
-
         if (!$this->config->isUsable()) {
             $this->logger->debug('Last.fm plugin not enabled: config incomplete or disabled');
             return;
@@ -113,7 +115,17 @@ final class LastfmPlugin implements LifecycleInterface, ConfigurableInterface
             $this->logger,
             $this->createAsyncHttpRunner()
         );
-        $this->scrobbler = new LastfmScrobbler($api, $sessions, $resolveTrack, $this->logger);
+        // Boot-safe split: hand the scrobbler a DEFERRED, idempotent
+        // schema-ensure hook instead of running migrations here. The
+        // migration fires lazily on the first playback event this worker
+        // actually processes — never across ~14 workers at boot.
+        $this->scrobbler = new LastfmScrobbler(
+            $api,
+            $sessions,
+            $resolveTrack,
+            $this->logger,
+            $this->makeSchemaEnsurer($container),
+        );
 
         $this->logger->info('Last.fm plugin enabled');
     }
@@ -184,28 +196,40 @@ final class LastfmPlugin implements LifecycleInterface, ConfigurableInterface
     }
 
     /**
-     * Run any pending Last.fm plugin database migrations.
+     * Build a DEFERRED, idempotent schema-ensure hook.
      *
-     * Attempts to resolve a {@see LastfmMigrationRunner} from the container
-     * and calls {@see LastfmMigrationRunner::run()}. If the runner is not
-     * registered in the container (e.g. in test environments), the plugin
-     * logs a debug message and continues — the host is responsible for
-     * ensuring the table exists before using the repository.
+     * The returned closure is handed to the {@see LastfmScrobbler}, which
+     * invokes it (guarded, at most once) on the FIRST playback event it
+     * processes — NOT at boot/enable. This is the boot-safety split for the
+     * item-5c3 landmine: `onEnable()` must do zero I/O, so migrations can
+     * no longer run there.
+     *
+     * When invoked, the closure resolves a {@see LastfmMigrationRunner}
+     * from the container and calls {@see LastfmMigrationRunner::run()}. The
+     * migration itself is `CREATE TABLE IF NOT EXISTS`, so it is safe to
+     * call repeatedly (idempotent) and safe under the concurrent workers
+     * that each ensure on their own first event. If the runner is not
+     * registered (e.g. test environments) the hook is a silent no-op.
+     *
+     * @return callable(): void
      */
-    private function runMigrations(ContainerInterface $container): void
+    private function makeSchemaEnsurer(ContainerInterface $container): callable
     {
-        if (!$container->has(LastfmMigrationRunner::class)) {
-            $this->logger->debug('Last.fm migration runner not registered in container, skipping');
-            return;
-        }
-        try {
-            /** @var LastfmMigrationRunner $runner */
-            $runner = $container->get(LastfmMigrationRunner::class);
-            $runner->run();
-            $this->logger->debug('Last.fm migrations completed');
-        } catch (\Throwable $e) {
-            $this->logger->warning('Last.fm migration runner threw', ['error' => $e->getMessage()]);
-        }
+        $logger = $this->logger;
+        return static function () use ($container, $logger): void {
+            if (!$container->has(LastfmMigrationRunner::class)) {
+                $logger->debug('Last.fm migration runner not registered in container, skipping');
+                return;
+            }
+            try {
+                /** @var LastfmMigrationRunner $runner */
+                $runner = $container->get(LastfmMigrationRunner::class);
+                $runner->run();
+                $logger->debug('Last.fm migrations completed (deferred, first-use)');
+            } catch (\Throwable $e) {
+                $logger->warning('Last.fm migration runner threw', ['error' => $e->getMessage()]);
+            }
+        };
     }
 
     /**
@@ -251,6 +275,9 @@ final class LastfmPlugin implements LifecycleInterface, ConfigurableInterface
         };
     }
 
+    /** Cooperative-wait ceiling (seconds) — just above the 10s transfer timeout. */
+    private const HTTP_MAX_WAIT_SECONDS = 12.0;
+
     /**
      * Build an async HTTP runner backed by workerman/http-client.
      *
@@ -279,27 +306,62 @@ final class LastfmPlugin implements LifecycleInterface, ConfigurableInterface
             'connect_timeout' => 3,
         ]);
 
+        return self::buildCooperativeRunner($client);
+    }
+
+    /**
+     * Wrap a {@see \Workerman\Http\Client} in the canonical Phlix
+     * cooperative-wait runner (see phlix-server `CLAUDE.md` "Async
+     * Patterns").
+     *
+     * The request is fired with `success`/`error` callbacks (async, does
+     * NOT block the event loop), then we cooperatively wait — `usleep(1000)`
+     * yields to the loop so other connections keep progressing while this
+     * scrobble's response arrives. This is the same shape used by
+     * `MetadataHttpClient`, `Hub\HttpClient`, and `S3Client`.
+     *
+     * Extracted (and non-private) so it can be unit-tested against a
+     * client double without an event loop or a live network.
+     *
+     * @return callable(string $url, string $body, array<string, string> $headers): array{status: int, body: string}
+     */
+    public static function buildCooperativeRunner(\Workerman\Http\Client $client): callable
+    {
         return static function (string $url, string $body, array $headers) use ($client): array {
+            $state = ['done' => false, 'status' => 0, 'body' => ''];
+
             try {
-                $response = $client->request($url, [
+                $client->request($url, [
                     'method'  => 'POST',
                     'data'    => $body,
                     'headers' => $headers,
+                    'success' => static function ($response) use (&$state): void {
+                        if ($response instanceof \Workerman\Http\Response) {
+                            $state['status'] = $response->getStatusCode();
+                            $state['body']   = (string) $response->getBody();
+                        }
+                        $state['done'] = true;
+                    },
+                    'error'   => static function ($_error) use (&$state): void {
+                        // Transport/DNS error — leave status 0 so the caller
+                        // treats it the same as a network-level failure.
+                        $state['done'] = true;
+                    },
                 ]);
-
-                if (!$response instanceof \Workerman\Http\Response) {
-                    return ['status' => 0, 'body' => ''];
-                }
-
-                return [
-                    'status' => $response->getStatusCode(),
-                    'body'   => $response->getBody()->getContents(),
-                ];
             } catch (\Throwable) {
-                // Transport or DNS error — return distinguishable zero-status
-                // failure so caller treats it the same as a network-level error.
+                // Synchronous throw (bad address, etc.) — zero-status failure.
                 return ['status' => 0, 'body' => ''];
             }
+
+            // Cooperative wait — yields to the event loop (usleep is hooked
+            // under the Swoole runtime) so the worker is NOT blocked.
+            $waited = 0.0;
+            while (!$state['done'] && $waited < self::HTTP_MAX_WAIT_SECONDS) {
+                usleep(1000); // 1ms
+                $waited += 0.001;
+            }
+
+            return ['status' => (int) $state['status'], 'body' => (string) $state['body']];
         };
     }
 }

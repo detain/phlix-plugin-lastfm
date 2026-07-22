@@ -73,7 +73,6 @@ final class LastfmControllerTest extends TestCase
             sharedSecret: is_string($configValues['shared_secret'] ?? null) ? $configValues['shared_secret'] : '',
             enabled: ($configValues['enabled'] ?? false) === true,
             callbackUrl: is_string($configValues['callback_url'] ?? null) ? $configValues['callback_url'] : '/settings/integrations/lastfm',
-            username: is_string($configValues['username'] ?? null) ? $configValues['username'] : '',
         );
 
         return new LastfmController(

@@ -32,7 +32,4 @@ return [
     // This is the route the user lands on after authorizing at Last.fm.
     // Default: /auth/lastfm/callback
     'callback_url' => '/auth/lastfm/callback',
-
-    // Optional: pre-fill the Last.fm username in the "Connected as X" display.
-    'username' => '',
 ];
