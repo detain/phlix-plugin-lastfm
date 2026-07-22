@@ -28,14 +28,11 @@ final class LastfmConfig
      * @param string $apiKey       Last.fm API key.
      * @param string $sharedSecret Shared secret used for `api_sig`.
      * @param bool   $enabled      Whether the plugin is enabled.
-     * @param string $callbackUrl  Callback URL the user lands on after
-     *                             approving the request token on Last.fm.
      */
     public function __construct(
         public readonly string $apiKey,
         public readonly string $sharedSecret,
         public readonly bool $enabled = false,
-        public readonly string $callbackUrl = '',
     ) {
     }
 
@@ -55,7 +52,6 @@ final class LastfmConfig
             apiKey: is_string($config['api_key'] ?? null) ? $config['api_key'] : '',
             sharedSecret: is_string($config['shared_secret'] ?? null) ? $config['shared_secret'] : '',
             enabled: ($config['enabled'] ?? false) === true,
-            callbackUrl: is_string($config['callback_url'] ?? null) ? $config['callback_url'] : '',
         );
     }
 

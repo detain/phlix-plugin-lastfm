@@ -27,9 +27,4 @@ return [
 
     // Your Last.fm shared secret (used to sign API requests).
     'shared_secret' => '',
-
-    // OAuth callback URL — must match what you registered in the Last.fm API account settings.
-    // This is the route the user lands on after authorizing at Last.fm.
-    // Default: /auth/lastfm/callback
-    'callback_url' => '/auth/lastfm/callback',
 ];

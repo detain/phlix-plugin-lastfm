@@ -49,13 +49,12 @@ final class LastfmPluginConfigureTest extends TestCase
             'enabled'       => true,
             'api_key'       => 'abc123',
             'shared_secret' => 'sh-secret',
-            'callback_url'  => '/auth/lastfm/callback',
         ]);
 
         $config = $this->config($plugin);
         $this->assertSame('abc123', $config->apiKey);
         $this->assertSame('sh-secret', $config->sharedSecret);
-        $this->assertSame('/auth/lastfm/callback', $config->callbackUrl);
+        $this->assertTrue($config->enabled);
         $this->assertTrue($config->isUsable());
     }
 

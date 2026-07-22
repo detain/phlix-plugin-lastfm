@@ -68,8 +68,7 @@ final class LastfmPlugin implements LifecycleInterface, ConfigurableInterface
      * so `onEnable()` sees the configured `api_key`/`shared_secret`/etc.
      *
      * @param array<string, mixed> $settings Persisted settings (the manifest's
-     *        `settings` key-set: `enabled`, `api_key`, `shared_secret`,
-     *        `callback_url`).
+     *        `settings` key-set: `enabled`, `api_key`, `shared_secret`).
      */
     public function configure(array $settings): void
     {

@@ -29,8 +29,7 @@
     },
     "autoload-dev": {
         "psr-4": {
-            "Phlix\\Tests\\Unit\\Plugins\\Scrobbler\\Lastfm\\": "tests/Unit/",
-            "Phlix\\Tests\\Unit\\Plugins\\Scrobbler\\Lastfm\\Support\\": "tests/Unit/Plugins/Scrobbler/Lastfm/Support/"
+            "Phlix\\Tests\\Unit\\Plugins\\Scrobbler\\Lastfm\\": "tests/Unit/"
         }
     },
     "config": {

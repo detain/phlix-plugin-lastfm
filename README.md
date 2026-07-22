@@ -43,8 +43,12 @@ Configure these in the Phlix admin **Plugins → Configure** dialog.
 | `enabled` | bool | no | `false` | Master on/off for Last.fm scrobbling. |
 | `api_key` | string | **yes** | — | Your Last.fm API key. Create a free API account at [last.fm/api/account/create](https://www.last.fm/api/account/create). |
 | `shared_secret` | string (secret) | **yes** | — | The "Shared secret" shown next to your API key on your [Last.fm API accounts](https://www.last.fm/api/accounts) page. Used to sign authenticated requests. |
-| `callback_url` | string | no | server URL | The Callback URL you registered for your Last.fm API application (OAuth handshake). |
-| `username` | string | no | — | Display-only: the Last.fm account scrobbles are sent to (set during authorization). |
+
+> The OAuth "Connect Last.fm" handshake (authorize + callback) is served by the
+> **host** at `GET /api/v1/oauth/lastfm` and `GET /api/v1/oauth/lastfm/callback`;
+> the callback URL is derived from the request host, so no `callback_url` setting
+> is needed. Per-user session keys are stored in `lastfm_sessions` and consumed
+> by the scrobbler.
 
 ### Where to get your credentials
 

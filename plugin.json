@@ -34,13 +34,6 @@
             "description": "The \"Shared secret\" shown next to your API key on your Last.fm API accounts page. Used to sign authenticated requests.",
             "link": "https://www.last.fm/api/accounts",
             "link_text": "Your Last.fm API accounts"
-        },
-        "callback_url": {
-            "type": "string",
-            "default": "",
-            "required": false,
-            "label": "OAuth Callback URL",
-            "description": "The Callback URL you registered for your Last.fm API application, used by the authorization callback route. Optional — defaults to /auth/lastfm/callback on this server."
         }
     }
 }
