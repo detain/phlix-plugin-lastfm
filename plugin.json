@@ -1,6 +1,6 @@
 {
     "name": "phlix-plugin-lastfm",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "phlix_min_server_version": "1.2.0",
     "type": "scrobbler",
     "entry": "Phlix\\Plugins\\Scrobbler\\Lastfm\\LastfmPlugin",
@@ -13,6 +13,7 @@
             "type": "boolean",
             "default": false,
             "required": false,
+            "tier": "standard",
             "label": "Enable scrobbling",
             "description": "Master on/off for Last.fm scrobbling. Optional; default off."
         },
@@ -20,6 +21,7 @@
             "type": "string",
             "default": "",
             "required": true,
+            "tier": "standard",
             "label": "Last.fm API Key",
             "description": "Your Last.fm API key. Create a free API account to get one.",
             "link": "https://www.last.fm/api/account/create",
@@ -30,6 +32,7 @@
             "default": "",
             "secret": true,
             "required": true,
+            "tier": "standard",
             "label": "Last.fm Shared Secret",
             "description": "The \"Shared secret\" shown next to your API key on your Last.fm API accounts page. Used to sign authenticated requests.",
             "link": "https://www.last.fm/api/accounts",
