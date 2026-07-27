@@ -65,8 +65,12 @@ vendor/bin/phpunit
 ```
 
 The entry class is `Phlix\Plugins\Scrobbler\Lastfm\LastfmPlugin` (implements
-`Phlix\Shared\Plugin\LifecycleInterface`). It runs inside a Phlix server host,
-which provides the playback/library services at runtime.
+`Phlix\Shared\Plugin\LifecycleInterface` and
+`Phlix\Shared\Plugin\ConfigurableInterface`). It runs inside a Phlix server host,
+which provides the playback/library services at runtime. `onEnable()` is
+boot-safe — it only wires collaborators and subscribes events — so the
+`lastfm_sessions` schema is ensured lazily on the first playback event, when
+`LastfmScrobbler` invokes the deferred `LastfmMigrationRunner` closure.
 
 ## License
 
