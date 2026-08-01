@@ -245,7 +245,7 @@ final class LastfmPlugin implements LifecycleInterface, ConfigurableInterface
         } catch (\Throwable) {
             $repoRaw = null;
         }
-        if (!$repoRaw instanceof ItemRepository) {
+        if ($repoRaw instanceof ItemRepository === false) {
             return static fn (string $_id) => null;
         }
         $repo = $repoRaw;
@@ -341,7 +341,7 @@ final class LastfmPlugin implements LifecycleInterface, ConfigurableInterface
                         }
                         $state['done'] = true;
                     },
-                    'error'   => static function ($_error) use (&$state): void {
+                    'error'   => static function ($_unused) use (&$state): void {
                         // Transport/DNS error — leave status 0 so the caller
                         // treats it the same as a network-level failure.
                         $state['done'] = true;

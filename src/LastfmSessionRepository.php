@@ -51,7 +51,7 @@ class LastfmSessionRepository
             return null;
         }
         $row = $rows[0];
-        if (!is_array($row)) {
+        if (is_array($row) === false) {
             return null;
         }
         $userIdVal = $row['user_id'] ?? null;
