@@ -57,7 +57,7 @@ class LastfmSessionRepository
         $userIdVal = $row['user_id'] ?? null;
         $sessionKey = $row['session_key'] ?? null;
         $connectedAt = $row['connected_at'] ?? null;
-        if (!is_string($userIdVal) || !is_string($sessionKey) || !is_string($connectedAt)) {
+        if (!is_string($userIdVal) || !is_string($sessionKey) || $sessionKey === '' || !is_string($connectedAt)) {
             return null;
         }
         return [

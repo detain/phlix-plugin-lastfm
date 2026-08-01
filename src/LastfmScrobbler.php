@@ -132,10 +132,15 @@ class LastfmScrobbler
         if ($track === null) {
             return;
         }
+        $title = $track['title'] ?? null;
+        $artist = $track['artist'] ?? null;
+        if ($title === null || $artist === null) {
+            return;
+        }
         $this->api->updateNowPlaying(
             $session['session_key'],
-            $track['title'],
-            $track['artist'],
+            $title,
+            $artist,
             $track['album'],
         );
     }
@@ -159,6 +164,11 @@ class LastfmScrobbler
         if ($track === null) {
             return;
         }
+        $title = $track['title'] ?? null;
+        $artist = $track['artist'] ?? null;
+        if ($title === null || $artist === null) {
+            return;
+        }
 
         $duration = $track['duration_seconds'];
         $playedSeconds = (int) ($event->finalPositionTicks / self::TICKS_PER_SECOND);
@@ -176,8 +186,8 @@ class LastfmScrobbler
 
         $this->api->scrobble(
             $session['session_key'],
-            $track['title'],
-            $track['artist'],
+            $title,
+            $artist,
             $track['album'],
             time() - $playedSeconds,
         );

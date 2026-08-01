@@ -51,7 +51,7 @@ final class LastfmConfig
         return new self(
             apiKey: is_string($config['api_key'] ?? null) ? $config['api_key'] : '',
             sharedSecret: is_string($config['shared_secret'] ?? null) ? $config['shared_secret'] : '',
-            enabled: ($config['enabled'] ?? false) === true,
+            enabled: ($config['enabled'] ?? false) == true,
         );
     }
 
