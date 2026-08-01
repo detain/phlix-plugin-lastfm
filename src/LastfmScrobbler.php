@@ -53,7 +53,7 @@ class LastfmScrobbler
      * returns the lookup data the scrobbler needs.
      *
      * @var (callable(string $mediaItemId): ?array{
-     *     title: string, artist: string, album: ?string, duration_seconds: ?int
+     *     title: string|null, artist: string|null, album: ?string, duration_seconds: ?int
      * })
      */
     private $resolveTrack;
@@ -78,7 +78,7 @@ class LastfmScrobbler
      * @param LastfmApi               $api          Last.fm HTTP client.
      * @param LastfmSessionRepository $sessions     Per-user session-key store.
      * @param callable(string): ?array{
-     *     title: string, artist: string, album: ?string, duration_seconds: ?int
+     *     title: string|null, artist: string|null, album: ?string, duration_seconds: ?int
      * } $resolveTrack Resolver that maps a `mediaItemId` to track metadata.
      * @param LoggerInterface|null    $logger       Optional PSR-3 logger.
      * @param (callable(): void)|null $ensureSchema Deferred, idempotent
@@ -132,8 +132,8 @@ class LastfmScrobbler
         if ($track === null) {
             return;
         }
-        $title = $track['title'] ?? null;
-        $artist = $track['artist'] ?? null;
+        $title = is_string($track['title'] ?? null) ? $track['title'] : null;
+        $artist = is_string($track['artist'] ?? null) ? $track['artist'] : null;
         if ($title === null || $artist === null) {
             return;
         }
@@ -141,7 +141,7 @@ class LastfmScrobbler
             $session['session_key'],
             $title,
             $artist,
-            $track['album'],
+            is_string($track['album'] ?? null) ? $track['album'] : null,
         );
     }
 
@@ -164,13 +164,13 @@ class LastfmScrobbler
         if ($track === null) {
             return;
         }
-        $title = $track['title'] ?? null;
-        $artist = $track['artist'] ?? null;
+        $title = is_string($track['title'] ?? null) ? $track['title'] : null;
+        $artist = is_string($track['artist'] ?? null) ? $track['artist'] : null;
         if ($title === null || $artist === null) {
             return;
         }
 
-        $duration = $track['duration_seconds'];
+        $duration = is_int($track['duration_seconds'] ?? null) ? $track['duration_seconds'] : null;
         $playedSeconds = (int) ($event->finalPositionTicks / self::TICKS_PER_SECOND);
 
         if (!$this->meetsScrobbleRules($duration, $playedSeconds)) {
@@ -188,7 +188,7 @@ class LastfmScrobbler
             $session['session_key'],
             $title,
             $artist,
-            $track['album'],
+            is_string($track['album'] ?? null) ? $track['album'] : null,
             time() - $playedSeconds,
         );
     }

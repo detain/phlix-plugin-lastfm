@@ -76,6 +76,41 @@ final class LastfmApiTest extends TestCase
         $this->assertNull($api->getSession('TOKEN'));
     }
 
+    public function testGetSessionReturnsNullWhenSessionNotArray(): void
+    {
+        // session is present but not an array (e.g., a string)
+        $api = $this->apiWith(200, json_encode(['session' => 'not-an-array']));
+        $this->assertNull($api->getSession('TOKEN'));
+    }
+
+    public function testGetSessionReturnsNullWhenKeyIsEmpty(): void
+    {
+        // session key is an empty string
+        $api = $this->apiWith(200, json_encode(['session' => ['key' => '', 'name' => 'username']]));
+        $this->assertNull($api->getSession('TOKEN'));
+    }
+
+    public function testGetSessionReturnsNullWhenNameIsEmpty(): void
+    {
+        // session name is an empty string
+        $api = $this->apiWith(200, json_encode(['session' => ['key' => 'sessionkey', 'name' => '']]));
+        $this->assertNull($api->getSession('TOKEN'));
+    }
+
+    public function testGetSessionReturnsNullWhenKeyIsNotString(): void
+    {
+        // session key is a number instead of string
+        $api = $this->apiWith(200, json_encode(['session' => ['key' => 12345, 'name' => 'username']]));
+        $this->assertNull($api->getSession('TOKEN'));
+    }
+
+    public function testGetSessionReturnsNullWhenNameIsNotString(): void
+    {
+        // session name is a number instead of string
+        $api = $this->apiWith(200, json_encode(['session' => ['key' => 'sessionkey', 'name' => 12345]]));
+        $this->assertNull($api->getSession('TOKEN'));
+    }
+
     public function testUpdateNowPlayingReturnsTrueOn200(): void
     {
         $api = $this->apiWith(200, json_encode([
