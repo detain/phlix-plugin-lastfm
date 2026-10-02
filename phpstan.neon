@@ -1,5 +1,7 @@
 parameters:
-    level: 6
+    # Level kept equal to the CI gate invocation (.github/workflows/test.yml: analyse src --level=9);
+    # raised 6 -> 9 on 2026-10-02 after measuring 0 errors at level 9.
+    level: 9
     paths:
         - src
     excludePaths:
