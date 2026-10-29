@@ -32,12 +32,34 @@ jobs:
       # setup-php provides pcov above, so ./coverage.xml is written by the run
       # itself - no extra --coverage flag is needed.
       - name: Upload coverage to Codacy
+        # M-LASTFM-CLUSTER (codacy-sibling cure, review lastfm__docmaint, 2026-10-29),
+        # mirroring myanimelist f4fa90e. The upload was GREEN here at 2ffb7db
+        # (Oct 20: "Coverage data uploaded. Coverage received successfully.").
+        # The same day, the sibling's POST to api.codacy.com began failing with
+        # "Failed to create coverage: No Write permission on Project" — a
+        # SERVER-side write-grant flip, invisible to anything repo-side: same
+        # action commit (89d6c85, the pin is kept unchanged), same secret, same
+        # reporter binary. The old posture papered that over with
+        # `continue-on-error: true`, which is exactly the silent-misreport the
+        # mal review named and rejected: lastfm's next push would fail the
+        # upload, leave one warning annotation nobody reads, and keep the whole
+        # matrix green.
+        #
+        # Cure: the fail-closed enable switch. With the switch unset the step
+        # renders SKIPPED — an honest, unmistakable "this check is off" — and
+        # once re-armed any renewed failure goes red on purpose. OWNER half, in
+        # order: restore Codacy write access (github.com/settings/installations
+        # -> Codacy -> confirm this repo is still granted; app.codacy.com ->
+        # project -> settings -> project API token -> update the
+        # CODACY_API_TOKEN repo secret), then set the repository custom
+        # variable CODACY_COVERAGE_ENABLED=true to re-arm. If Codacy is not
+        # worth keeping, delete this step outright — no gate here depends on
+        # it (the S440 guard test slices the workflow from `composer-audit:`
+        # onward; this step is outside its law).
         uses: codacy/codacy-coverage-reporter-action@89d6c85cfafaec52c72b6c5e8b2878d33104c699
-        # Never allowed to fail the build: a missing/expired token or a Codacy
-        # outage must not turn CI red.
-        continue-on-error: true
-        # One upload only - both matrix legs produce an identical report.
-        if: matrix.php == '8.3'
+        # One upload only - both matrix legs produce an identical report;
+        # fail-closed Codacy switch (see above) gates the other half.
+        if: ${{ matrix.php == '8.3' && vars.CODACY_COVERAGE_ENABLED == 'true' }}
         with:
           api-token: ${{ secrets.CODACY_API_TOKEN }}
           coverage-reports: ./coverage.xml
