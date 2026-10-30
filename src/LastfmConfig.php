@@ -12,12 +12,18 @@ declare(strict_types=1);
 namespace Phlix\Plugins\Scrobbler\Lastfm;
 
 /**
- * Typed wrapper over `config/lastfm.php`.
+ * Typed wrapper over the plugin's persisted settings.
  *
- * Centralises the read of the Last.fm config slice so other classes do
- * not duplicate the `is_string()`/`is_bool()` ladder. The wrapped array
- * is expected to contain — at minimum — `api_key` and `shared_secret`;
- * see `config/lastfm.php` for the full schema.
+ * The settings arrive exclusively via {@see LastfmPlugin::configure()} —
+ * the host hydrates them from the DB `plugins.settings_json` column (the
+ * manifest's `settings` key-set: `enabled`, `api_key`, `shared_secret`).
+ * There is deliberately no config-file path: earlier revisions shipped a
+ * bundled `config/lastfm.php` that no code ever loaded (the settings are
+ * per-installation DB state, not files), and it was removed as a ghost
+ * setup path [review lastfm__docmaint M-01].
+ *
+ * Centralises the read of the Last.fm settings slice so other classes do
+ * not duplicate the `is_string()`/`is_bool()` ladder.
  *
  * @package Phlix\Plugins\Scrobbler\Lastfm
  * @since 0.15.0
@@ -42,9 +48,9 @@ final class LastfmConfig
      * Values are coerced defensively — string defaults to `''`, bool to
      * `false`.
      *
-     * @param array<string, mixed> $config Raw config slice (typically the
-     *                                     return value of
-     *                                     `include config/lastfm.php`).
+     * @param array<string, mixed> $config Raw settings slice as delivered by
+     *                                     the host to
+     *                                     `LastfmPlugin::configure()`.
      */
     public static function fromArray(array $config): self
     {

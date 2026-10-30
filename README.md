@@ -40,7 +40,7 @@ Configure these in the Phlix admin **Plugins → Configure** dialog.
 
 | Setting | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `enabled` | bool | no | `false` | Master on/off for Last.fm scrobbling. Compared loosely, so truthy values such as `'true'` from `config/lastfm.php` also enable it. |
+| `enabled` | bool | no | `false` | Master on/off for Last.fm scrobbling. Compared loosely, so truthy string values such as `'true'` persisted in the settings also enable it. |
 | `api_key` | string | **yes** | — | Your Last.fm API key. Create a free API account at [last.fm/api/account/create](https://www.last.fm/api/account/create). |
 | `shared_secret` | string (secret) | **yes** | — | The "Shared secret" shown next to your API key on your [Last.fm API accounts](https://www.last.fm/api/accounts) page. Used to sign authenticated requests. |
 
