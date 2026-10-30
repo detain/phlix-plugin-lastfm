@@ -179,6 +179,57 @@ final class LastfmApiHttpTest extends TestCase
     }
 
     /**
+     * W-min52 M-20 [review lastfm minors W-min52] — the scrobble twin of
+     * the nowplaying error-in-200 pin above: the envelope branch lives in
+     * the shared dispatch, but the scrobble call site had never been
+     * driven through it, so a revoked session during scrobbling could
+     * regress into silence without any test noticing.
+     */
+    public function testScrobble200ErrorEnvelopeIsLoggedAndSurfacedAsTypedFailure(): void
+    {
+        $warnings = [];
+
+        $logger = new class ($warnings) extends NullLogger {
+            /** @var array<int, array{message: string, context: array<string, mixed>}> */
+            private array $warningsRef;
+
+            public function __construct(array &$warningsRef)
+            {
+                $this->warningsRef = &$warningsRef;
+            }
+
+            public function warning($message, array $context = []): void
+            {
+                $this->warningsRef[] = ['message' => $message, 'context' => $context];
+            }
+        };
+
+        $http = static function (): array {
+            return [
+                'status' => 200,
+                'body' => '{"error":9,"message":"Invalid session key - Please re-authenticate"}',
+            ];
+        };
+
+        $api = new LastfmApi('API_KEY', 'SHARED_SECRET', $logger, $http);
+        $outcome = $api->scrobble('SESSION_KEY', 'Track', 'Artist', null, 1700000000);
+
+        $this->assertFalse($outcome->success, 'error-in-200 must not surface as a scrobble success');
+        $this->assertSame(9, $outcome->errorCode);
+        $this->assertSame('Invalid session key - Please re-authenticate', $outcome->errorMessage);
+        $this->assertTrue($outcome->isInvalidSession(), 'error 9 must classify for the self-heal purge path');
+
+        $envelopeLogs = array_values(array_filter(
+            $warnings,
+            static fn (array $w): bool => $w['message'] === 'Last.fm API error envelope',
+        ));
+        $this->assertCount(1, $envelopeLogs, 'the error-in-200 scrobble path must be logged once');
+        $this->assertSame(9, $envelopeLogs[0]['context']['error']);
+        $this->assertSame('track.scrobble', $envelopeLogs[0]['context']['method']);
+        $this->assertStringContainsString('Invalid session key', (string) $envelopeLogs[0]['context']['message']);
+    }
+
+    /**
      * M-23 [review lastfm minors W-min49]: an "ok-shaped" 200 whose body is
      * not the documented `nowplaying` payload still counts as success
      * (permissive verdict survives shape variance) but must leave a debug

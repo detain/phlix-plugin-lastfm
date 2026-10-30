@@ -9,6 +9,13 @@ its tag lands (tagging is an owner action).
 
 ### Fixed
 
+- W-min52 minors batch: the workerman/mysql prepared-statement binding path
+  is now exercised end-to-end (`LastfmSessionRepositoryBindingTest` drives
+  the real vendor `execute()`/`bindMore()` against a socket-free PDO probe —
+  placeholder SQL constant, hostile values never in SQL text, emulated
+  prepares pinned off) and the scrobble call site gained its missing
+  error-in-200 envelope pin plus a recorded Last.fm docs payload exercising
+  the `@attr` verdict parser.
 - W-min51 minors batch: README now states the real phpstan level (9, matching
   the CI gate) and the `phpstan.neon` `class.notFound` ignore is narrowed from
   a file-wide blanket to the two measured ItemRepository messages — any new

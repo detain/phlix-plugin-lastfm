@@ -226,6 +226,62 @@ final class LastfmApiTest extends TestCase
         $this->assertSame('duplicate', $outcome->ignoreReason);
     }
 
+    /**
+     * W-min52 M-20 [review lastfm minors W-min52] — a RECORDED payload,
+     * held verbatim as wire text (the Last.fm API documentation's sample
+     * JSON response for track.scrobble), not a hand-crafted json_encode
+     * array. Real deliveries carry the full entry shape — album/
+     * albumArtist blocks, an empty ignoredMessage with a `_type` marker,
+     * a url-bearing track element keyed `name` instead of `#text` — and
+     * the @attr verdict parser must ride that shape unchanged.
+     */
+    public function testRecordedDocsPayloadWithFullScrobbleEntryParsesAttrVerdict(): void
+    {
+        $recorded = <<<'JSON'
+{
+   "scrobbles": {
+      "scrobble": [
+         {
+            "artist": {
+               "mbid": "",
+               "#text": "Pigbag"
+            },
+            "track": {
+               "url": "https://www.last.fm/music/Pigbag/_/Papa+Was+a+Rollin+Stone",
+               "name": "Papa Was a Rollin Stone"
+            },
+            "album": {
+               "mbid": "",
+               "#text": "Papa Was a Rollin'"
+            },
+            "albumArtist": {
+               "mbid": "",
+               "#text": "Pigbag"
+            },
+            "ignoredMessage": {
+               "code": "0",
+               "#text": "",
+               "_type": "int"
+            }
+         }
+      ],
+      "@attr": {
+         "accepted": "1",
+         "ignored": "0"
+      }
+   }
+}
+JSON;
+        $api = $this->apiWith(200, $recorded);
+
+        $outcome = $api->scrobble('SK', 'Papa Was a Rollin Stone', 'Pigbag', null, 1700000000);
+
+        $this->assertTrue($outcome->success, 'the documented accepted verdict must survive the recorded shape');
+        $this->assertSame(1, $outcome->accepted);
+        $this->assertSame(0, $outcome->ignored);
+        $this->assertNull($outcome->ignoreReason);
+    }
+
     public function testScrobbleIncludesSortedSignatureAndTimestamp(): void
     {
         $captured = ['url' => '', 'body' => ''];
