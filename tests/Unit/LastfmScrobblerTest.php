@@ -218,6 +218,32 @@ final class LastfmScrobblerTest extends TestCase
     }
 
     /**
+     * M-03 [review lastfm__srphp M03] end-to-end wire of the verdict: a
+     * 200-but-ignored scrobble must surface through the M-04 failure log
+     * carrying the per-scrobble ignore reason.
+     */
+    public function testOnPlaybackStoppedLogsIgnoreReasonForRefusedScrobble(): void
+    {
+        $this->sessions->method('findByUserId')->willReturn([
+            'user_id' => 'u1', 'session_key' => 'SK', 'connected_at' => '2024-01-01 00:00:00',
+        ]);
+        $this->api->method('scrobble')->willReturn(LastfmOutcome::scrobbleRejected(0, 1, 'banned'));
+
+        /** @var array<int, array{message: string, context: array<string, mixed>}> $warnings */
+        $warnings = [];
+        $scrobbler = $this->buildScrobbler(static fn (string $_id) => [
+            'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
+        ], $this->warningCollector($warnings));
+
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', 101 * 10_000_000, true));
+
+        $this->assertCount(1, $warnings);
+        $this->assertSame('Last.fm scrobble submission failed', $warnings[0]['message']);
+        $this->assertSame(1, $warnings[0]['context']['ignored']);
+        $this->assertSame('banned', $warnings[0]['context']['ignore_reason']);
+    }
+
+    /**
      * @param array<int, array{message: string, context: array<string, mixed>}> $warnings
      */
     private function warningCollector(array &$warnings): NullLogger

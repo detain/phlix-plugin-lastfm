@@ -139,6 +139,93 @@ final class LastfmApiTest extends TestCase
         $this->assertFalse($api->scrobble('SK', 'Song', 'Artist')->success);
     }
 
+    /**
+     * M-03 [review lastfm__srphp M03] — recorded-shape refusal: Last.fm
+     * answers a refused submission with HTTP 200, no top-level `error`, and
+     * `scrobbles.@attr` carrying accepted=0/ignored=1 plus the per-scrobble
+     * ignore reason. That is a rejection, not a success.
+     */
+    public function testScrobble200WithIgnoredAttrIsRejectedAndCarriesReason(): void
+    {
+        $recorded = json_encode([
+            'scrobbles' => [
+                '@attr' => ['accepted' => '0', 'ignored' => '1', 'total' => '1'],
+                'scrobble' => [
+                    'artist' => ['#text' => 'Artist'],
+                    'track'  => ['#text' => 'Song'],
+                    'ignore' => ['#text' => 'true', '@attr' => ['reason' => 'banned']],
+                ],
+            ],
+        ]);
+        $api = $this->apiWith(200, $recorded);
+
+        $outcome = $api->scrobble('SK', 'Song', 'Artist', null, 1700000000);
+
+        $this->assertFalse($outcome->success, '200-but-ignored must not be reported as success');
+        $this->assertSame(0, $outcome->accepted);
+        $this->assertSame(1, $outcome->ignored);
+        $this->assertSame('banned', $outcome->ignoreReason);
+        // The reason must reach the log line the scrobbler emits (M-04 wiring):
+        $this->assertArrayHasKey('ignore_reason', $outcome->logContext());
+        $this->assertSame('banned', $outcome->logContext()['ignore_reason']);
+    }
+
+    /** The @attr-accepted twin: accepted=1/ignored=0 keeps the success verdict. */
+    public function testScrobble200WithAcceptedAttrSucceeds(): void
+    {
+        $recorded = json_encode([
+            'scrobbles' => [
+                '@attr' => ['accepted' => '1', 'ignored' => '0', 'total' => '1'],
+                'scrobble' => ['artist' => ['#text' => 'Artist'], 'track' => ['#text' => 'Song']],
+            ],
+        ]);
+        $api = $this->apiWith(200, $recorded);
+
+        $outcome = $api->scrobble('SK', 'Song', 'Artist', null, 1700000000);
+
+        $this->assertTrue($outcome->success);
+        $this->assertSame(1, $outcome->accepted);
+        $this->assertSame(0, $outcome->ignored);
+        $this->assertNull($outcome->ignoreReason);
+    }
+
+    /**
+     * Shape-variance law (per the review's fix-essence): an absent or
+     * non-numeric `@attr` keeps the permissive verdict — the parser must
+     * never turn a Last.fm format change into crashed scrobbling. The
+     * fixture in testScrobbleReturnsTrueOn200 pins the absent half.
+     */
+    public function testScrobbleGarbageAttrKeepsPermissiveSuccess(): void
+    {
+        $recorded = json_encode([
+            'scrobbles' => ['@attr' => ['accepted' => 'yes', 'ignored' => ['weird']], 'scrobble' => []],
+        ]);
+        $api = $this->apiWith(200, $recorded);
+
+        $outcome = $api->scrobble('SK', 'Song', 'Artist', null, 1700000000);
+
+        $this->assertTrue($outcome->success);
+        $this->assertNull($outcome->accepted);
+        $this->assertNull($outcome->ignored);
+    }
+
+    /** Some recorded deliveries carry the reason as a direct `reason` key. */
+    public function testScrobbleIgnoreReasonFromDirectKeyShape(): void
+    {
+        $recorded = json_encode([
+            'scrobbles' => [
+                '@attr' => ['accepted' => '0', 'ignored' => '1'],
+                'scrobble' => ['ignore' => ['#text' => 'true', 'reason' => 'duplicate']],
+            ],
+        ]);
+        $api = $this->apiWith(200, $recorded);
+
+        $outcome = $api->scrobble('SK', 'Song', 'Artist', null, 1700000000);
+
+        $this->assertFalse($outcome->success);
+        $this->assertSame('duplicate', $outcome->ignoreReason);
+    }
+
     public function testScrobbleIncludesSortedSignatureAndTimestamp(): void
     {
         $captured = ['url' => '', 'body' => ''];

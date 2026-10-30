@@ -156,6 +156,12 @@ class LastfmApi
      * (see {@see LastfmScrobbler::onPlaybackStopped()}) is responsible
      * for that gating.
      *
+     * The returned verdict is Last.fm's own: a 200 whose
+     * `scrobbles.@attr.ignored` count is positive is a REFUSAL
+     * (`scrobbleRejected`, reason carried when the API reports one), never
+     * a success — HTTP-level "no error" alone is not acceptance
+     * [review lastfm__srphp M-03].
+     *
      * @param string      $sessionKey Authenticated session key.
      * @param string      $track      Track title.
      * @param string      $artist     Artist name.
@@ -185,7 +191,13 @@ class LastfmApi
         $params['format']  = 'json';
 
         $response = $this->call($params);
-        return $response === null ? LastfmOutcome::failure() : self::outcomeFrom($response);
+        if ($response === null) {
+            return LastfmOutcome::failure();
+        }
+        if (isset($response['error'])) {
+            return self::outcomeFrom($response);
+        }
+        return self::scrobbleOutcome($response);
     }
 
     /**
@@ -291,6 +303,91 @@ class LastfmApi
     }
 
     /**
+     * Map a decoded 2xx **scrobble** body (no top-level error) to a typed
+     * outcome via Last.fm's per-submission verdict channel.
+     *
+     * M-03 [review lastfm__srphp M03]: `track.scrobble` answers a REFUSED
+     * submission with HTTP 200, no `error`, and `scrobbles.@attr` counts
+     * (`accepted`/`ignored`) plus a per-scrobble `ignore` reason (banned
+     * channel, timestamp rules, quality filter). Treating that shape as
+     * success reported listens as recorded while holes appeared in the
+     * user's history with zero diagnostic trail.
+     *
+     * The parse is cast-guarded end to end: an absent or non-numeric
+     * `@attr` keeps the permissive verdict, so upstream shape variance can
+     * never break the scrobble path — it can only lose the extra detail.
+     *
+     * @param array<string, mixed> $response
+     */
+    private static function scrobbleOutcome(array $response): LastfmOutcome
+    {
+        $scrobbles = $response['scrobbles'] ?? null;
+        if (!is_array($scrobbles)) {
+            return LastfmOutcome::success();
+        }
+        $attr = $scrobbles['@attr'] ?? null;
+        if (!is_array($attr)) {
+            return LastfmOutcome::success();
+        }
+        $accepted = self::numericField($attr, 'accepted');
+        $ignored = self::numericField($attr, 'ignored');
+        if ($accepted === null && $ignored === null) {
+            return LastfmOutcome::success();
+        }
+        if ($ignored !== null && $ignored > 0) {
+            return LastfmOutcome::scrobbleRejected($accepted ?? 0, $ignored, self::ignoreReason($scrobbles));
+        }
+        return LastfmOutcome::scrobbleAccepted($accepted ?? 0);
+    }
+
+    /**
+     * Extract the per-scrobble ignore reason from the recorded response
+     * shapes — `ignore.@attr.reason` and `ignore.reason` both occur in the
+     * wild; a list-shaped `scrobble` element (multi submissions) is scanned
+     * entry-wise.
+     *
+     * @param array<array-key, mixed> $scrobbles
+     */
+    private static function ignoreReason(array $scrobbles): ?string
+    {
+        $element = $scrobbles['scrobble'] ?? null;
+        if (!is_array($element)) {
+            return null;
+        }
+        $entries = array_is_list($element) ? $element : [$element];
+        foreach ($entries as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            $ignore = $entry['ignore'] ?? null;
+            if (!is_array($ignore)) {
+                continue;
+            }
+            $attrReason = is_array($ignore['@attr'] ?? null) ? $ignore['@attr']['reason'] ?? null : null;
+            if (is_string($attrReason) && $attrReason !== '') {
+                return $attrReason;
+            }
+            $directReason = $ignore['reason'] ?? null;
+            if (is_string($directReason) && $directReason !== '') {
+                return $directReason;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Numeric map field as int, or null when absent/non-numeric — shape
+     * variance must never explode the parser.
+     *
+     * @param array<array-key, mixed> $row
+     */
+    private static function numericField(array $row, string $key): ?int
+    {
+        $raw = $row[$key] ?? null;
+        return is_numeric($raw) ? (int) $raw : null;
+    }
+
+    /**
      * Envelope `error` as int, or null when absent/non-numeric — shape
      * variance must never explode the parser.
      *
@@ -298,8 +395,7 @@ class LastfmApi
      */
     private static function envelopeCode(array $response): ?int
     {
-        $raw = $response['error'] ?? null;
-        return is_numeric($raw) ? (int) $raw : null;
+        return self::numericField($response, 'error');
     }
 
     /**
