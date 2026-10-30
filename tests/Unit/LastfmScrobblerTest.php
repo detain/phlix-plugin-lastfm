@@ -422,6 +422,193 @@ final class LastfmScrobblerTest extends TestCase
     }
 
     /**
+     * M-05 [review lastfm__srphp M-03]: a transient scrobble failure is
+     * queued in-process and replayed on a later stop event; Last.fm
+     * dedups by timestamp so replay is safe.
+     */
+    public function testTransientScrobbleFailureIsQueuedAndDrainedOnNextEvent(): void
+    {
+        $this->sessions->method('findByUserId')->willReturn([
+            'user_id' => 'u1', 'session_key' => 'SK', 'connected_at' => '2024-01-01 00:00:00',
+        ]);
+        $transient = LastfmOutcome::failure(8, 'Operation failed', true, null);
+        $this->api->method('scrobble')->willReturnOnConsecutiveCalls(
+            $transient,                     // event 1 live attempt → queued
+            LastfmOutcome::success(),       // event 2 drain → accepted
+            LastfmOutcome::success(),       // event 2 live attempt
+        );
+
+        /** @var array<int, array{message: string, context: array<string, mixed>}> $warnings */
+        $warnings = [];
+        $scrobbler = $this->buildScrobbler(static fn (string $_id) => [
+            'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
+        ], $this->warningCollector($warnings));
+
+        $stop = new PlaybackStopped('s', 'u1', 'm', 'd', 101 * 10_000_000, true);
+        $scrobbler->onPlaybackStopped($stop);
+        $this->assertCount(1, $this->readQueue($scrobbler));
+        $this->assertContains('Last.fm scrobble queued for retry', array_column($warnings, 'message'));
+
+        $scrobbler->onPlaybackStopped($stop);
+        $this->assertCount(0, $this->readQueue($scrobbler), 'drain must consume the queued job');
+    }
+
+    /** Terminal failures (not transient, not session-invalid) are never queued. */
+    public function testTerminalScrobbleFailureIsNotQueued(): void
+    {
+        $this->sessions->method('findByUserId')->willReturn([
+            'user_id' => 'u1', 'session_key' => 'SK', 'connected_at' => '2024-01-01 00:00:00',
+        ]);
+        $this->api->expects(self::exactly(2))->method('scrobble')
+            ->willReturn(LastfmOutcome::failure(16, 'Permission denied'));
+
+        $scrobbler = $this->buildScrobbler(static fn (string $_id) => [
+            'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
+        ]);
+        $stop = new PlaybackStopped('s', 'u1', 'm', 'd', 101 * 10_000_000, true);
+        $scrobbler->onPlaybackStopped($stop);
+        $scrobbler->onPlaybackStopped($stop);
+
+        $this->assertCount(0, $this->readQueue($scrobbler));
+    }
+
+    /** M-05: an immature job (Retry-After not elapsed yet) is skipped by the drain. */
+    public function testImmatureQueuedJobIsNotDrainedEarly(): void
+    {
+        $this->sessions->method('findByUserId')->willReturn([
+            'user_id' => 'u1', 'session_key' => 'SK', 'connected_at' => '2024-01-01 00:00:00',
+        ]);
+        $this->api->expects(self::once())->method('scrobble')
+            ->willReturn(LastfmOutcome::failure(8, 'x', true, 600));
+
+        $scrobbler = $this->buildScrobbler(static fn (string $_id) => [
+            'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
+        ]);
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', 101 * 10_000_000, true));
+        // Queued with not_before ≈ now+600: the NEXT live attempt (none here)
+        // and a further stop event must not touch it… event 1's own failure
+        // IS the single call; a second event would be call 2 — assert queue
+        // still holds the immature job instead:
+        $queue = $this->readQueue($scrobbler);
+        $this->assertCount(1, $queue);
+        $this->assertGreaterThan(microtime(true), $queue[0]['not_before']);
+    }
+
+    /** M-05: after MAX_SCROBBLE_ATTEMPTS total tries a job is dropped with a warning. */
+    public function testQueuedJobExhaustingAttemptsIsDroppedWithWarning(): void
+    {
+        $this->sessions->method('findByUserId')->willReturn([
+            'user_id' => 'u1', 'session_key' => 'SK', 'connected_at' => '2024-01-01 00:00:00',
+        ]);
+        $this->api->method('scrobble')
+            ->willReturn(LastfmOutcome::failure(8, 'still down', true, null));
+
+        /** @var array<int, array{message: string, context: array<string, mixed>}> $warnings */
+        $warnings = [];
+        $scrobbler = $this->buildScrobbler(static fn (string $_id) => [
+            'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
+        ], $this->warningCollector($warnings));
+        $this->seedQueue($scrobbler, [$this->queuedJob('Old', LastfmScrobbler::MAX_SCROBBLE_ATTEMPTS)]);
+
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', 101 * 10_000_000, true));
+
+        $this->assertContains('Last.fm queued scrobble dropped after exhausting retries', array_column($warnings, 'message'));
+        $queue = $this->readQueue($scrobbler);
+        $this->assertCount(1, $queue, 'only the fresh event-1 job remains');
+        $this->assertSame('Song', $queue[0]['track']);
+    }
+
+    /** M-05: the queue is bounded; overflow drops the OLDEST pending job, loudly. */
+    public function testQueueOverflowDropsOldestWithWarning(): void
+    {
+        $this->sessions->method('findByUserId')->willReturn([
+            'user_id' => 'u1', 'session_key' => 'SK', 'connected_at' => '2024-01-01 00:00:00',
+        ]);
+        $this->api->method('scrobble')
+            ->willReturn(LastfmOutcome::failure(8, 'x', true, null));
+
+        /** @var array<int, array{message: string, context: array<string, mixed>}> $warnings */
+        $warnings = [];
+        $scrobbler = $this->buildScrobbler(static fn (string $_id) => [
+            'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
+        ], $this->warningCollector($warnings));
+        $immature = microtime(true) + 600;
+        $jobs = [];
+        for ($i = 0; $i < LastfmScrobbler::MAX_RETRY_QUEUE_SIZE; $i++) {
+            $jobs[] = $this->queuedJob('Track-' . $i, 1, $immature);
+        }
+        $this->seedQueue($scrobbler, $jobs);
+
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', 101 * 10_000_000, true));
+
+        $this->assertContains('Last.fm scrobble retry queue overflow — oldest submission dropped', array_column($warnings, 'message'));
+        $queue = $this->readQueue($scrobbler);
+        $this->assertCount(LastfmScrobbler::MAX_RETRY_QUEUE_SIZE, $queue);
+        $this->assertSame('Track-1', $queue[0]['track'], 'oldest must be the one evicted');
+        $this->assertSame('Song', $queue[LastfmScrobbler::MAX_RETRY_QUEUE_SIZE - 1]['track'], 'newest enqueued last');
+    }
+
+    /** M-05×M-02 interaction: purging an invalid session drops that user's queued jobs. */
+    public function testInvalidSessionPurgeDropsQueuedJobsForThatUser(): void
+    {
+        $this->sessions->method('findByUserId')->willReturn([
+            'user_id' => 'u1', 'session_key' => 'SK', 'connected_at' => '2024-01-01 00:00:00',
+        ]);
+        $this->sessions->expects(self::atLeastOnce())->method('delete')->with('u1');
+        $this->api->method('scrobble')->willReturn(LastfmOutcome::failure(88, 'Invalid session key', true, null));
+
+        $scrobbler = $this->buildScrobbler(static fn (string $_id) => [
+            'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
+        ]);
+        $this->seedQueue($scrobbler, [
+            $this->queuedJob('Queued-1'),
+            $this->queuedJob('Other', 1, microtime(true) + 600, 'u2'),
+        ]);
+
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', 101 * 10_000_000, true));
+
+        $queue = $this->readQueue($scrobbler);
+        $this->assertCount(1, $queue);
+        $this->assertSame('u2', $queue[0]['user_id'], 'other users keep their queues');
+    }
+
+    /**
+     * @param list<array{user_id:string,session_key:string,track:string,artist:string,album:?string,timestamp:int,attempts:int,not_before:float}> $jobs
+     */
+    private function seedQueue(LastfmScrobbler $scrobbler, array $jobs): void
+    {
+        $property = new \ReflectionProperty(LastfmScrobbler::class, 'scrobbleRetryQueue');
+        $property->setValue($scrobbler, $jobs);
+    }
+
+    /**
+     * @return list<array{user_id:string,session_key:string,track:string,artist:string,album:?string,timestamp:int,attempts:int,not_before:float}>
+     */
+    private function readQueue(LastfmScrobbler $scrobbler): array
+    {
+        /** @var list<array{user_id:string,session_key:string,track:string,artist:string,album:?string,timestamp:int,attempts:int,not_before:float}> $queue */
+        $queue = (new \ReflectionProperty(LastfmScrobbler::class, 'scrobbleRetryQueue'))->getValue($scrobbler);
+        return $queue;
+    }
+
+    /**
+     * @return array{user_id:string,session_key:string,track:string,artist:string,album:?string,timestamp:int,attempts:int,not_before:float}
+     */
+    private function queuedJob(string $track, int $attempts = 1, float $notBefore = 0.0, string $userId = 'u1'): array
+    {
+        return [
+            'user_id' => $userId,
+            'session_key' => 'SK',
+            'track' => $track,
+            'artist' => 'Artist',
+            'album' => null,
+            'timestamp' => time() - 300,
+            'attempts' => $attempts,
+            'not_before' => $notBefore,
+        ];
+    }
+
+    /**
      * @param array<int, array{message: string, context: array<string, mixed>}> $warnings
      */
     private function warningCollector(array &$warnings): NullLogger

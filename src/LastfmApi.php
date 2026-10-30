@@ -45,12 +45,34 @@ class LastfmApi
     /** Default Last.fm Web Service endpoint. */
     public const API_ROOT = 'https://ws.audioscrobbler.com/2.0/';
 
+    /**
+     * M-05 [review lastfm__srphp M03]: Last.fm is a courtesy-polite API;
+     * hammering it during a transient outage converts backoff into harder
+     * throttling. One client instance == one API key in this plugin, so a
+     * per-instance minimum dispatch interval is the honest pacing seam.
+     */
+    public const DEFAULT_MIN_INTERVAL_SECONDS = 0.2;
+
+    /**
+     * Envelope code that means the APPLICATION (API key) hit its rate
+     * limit — the docs list 29 as "API key is disabled", and live traffic
+     * also returns it for daily/hourly throttling. Either way the fix is
+     * operator/upstream-side and WAITING is the correct client behavior,
+     * so it classifies as transient [review lastfm__srphp M03].
+     */
+    public const RATE_LIMIT_ENVELOPE_CODE = 29;
+
     private LoggerInterface $logger;
+
+    private float $minIntervalSeconds;
+
+    /** Wall time of the previous dispatch; null until the first call. */
+    private ?float $lastDispatchAt = null;
 
     /**
      * Pluggable HTTP runner for tests. Defaults to {@see self::defaultHttp()}.
      *
-     * @var callable(string $url, string $body, array<string, string> $headers): array{status: int, body: string}
+     * @var callable(string $url, string $body, array<string, string> $headers): array{status: int, body: string, headers?: array<array-key, mixed>}
      */
     private $http;
 
@@ -58,17 +80,22 @@ class LastfmApi
      * @param string                              $apiKey       Last.fm API key.
      * @param string                              $sharedSecret Shared secret used to sign requests.
      * @param LoggerInterface|null                $logger       Optional PSR-3 logger.
-     * @param (callable(string, string, array<string, string>): array{status: int, body: string})|null $http
+     * @param (callable(string, string, array<string, string>): array{status: int, body: string, headers?: array<array-key, mixed>})|null $http
      *        Optional HTTP runner override (test hook).
+     * @param float|null                          $minIntervalSeconds
+     *        Pacing floor between dispatches (M-05). Null = {@see self::DEFAULT_MIN_INTERVAL_SECONDS};
+     *        0 disables pacing (unit tests).
      */
     public function __construct(
         private readonly string $apiKey,
         private readonly string $sharedSecret,
         ?LoggerInterface $logger = null,
         ?callable $http = null,
+        ?float $minIntervalSeconds = null,
     ) {
         $this->logger = $logger ?? new NullLogger();
         $this->http = $http ?? self::defaultHttp();
+        $this->minIntervalSeconds = $minIntervalSeconds ?? self::DEFAULT_MIN_INTERVAL_SECONDS;
     }
 
     /**
@@ -144,8 +171,12 @@ class LastfmApi
         $params['api_sig'] = $this->buildApiSig($params);
         $params['format']  = 'json';
 
-        $response = $this->call($params);
-        return $response === null ? LastfmOutcome::failure() : self::outcomeFrom($response);
+        $response = $this->dispatch($params);
+        $decoded = $response['decoded'];
+        if ($decoded !== null && !isset($decoded['error'])) {
+            return LastfmOutcome::success();
+        }
+        return self::failureOutcome($response);
     }
 
     /**
@@ -190,14 +221,12 @@ class LastfmApi
         $params['api_sig'] = $this->buildApiSig($params);
         $params['format']  = 'json';
 
-        $response = $this->call($params);
-        if ($response === null) {
-            return LastfmOutcome::failure();
+        $response = $this->dispatch($params);
+        $decoded = $response['decoded'];
+        if ($decoded !== null && !isset($decoded['error'])) {
+            return self::scrobbleOutcome($decoded);
         }
-        if (isset($response['error'])) {
-            return self::outcomeFrom($response);
-        }
-        return self::scrobbleOutcome($response);
+        return self::failureOutcome($response);
     }
 
     /**
@@ -236,8 +265,9 @@ class LastfmApi
     /**
      * Execute one Last.fm API call via POST and decode the JSON body.
      *
-     * Returns null on any non-2xx status, a transport failure, or an
-     * unparseable body — callers translate that to a `false` outcome.
+     * Thin seam over {@see self::dispatch()} for callers that only need the
+     * decoded body (token exchange); the scrobble paths use dispatch()
+     * directly to keep the transient/terminal classification honest.
      *
      * @param array<string, string> $params Final parameter set including `api_sig` + `format=json`.
      *
@@ -245,6 +275,30 @@ class LastfmApi
      */
     private function call(array $params): ?array
     {
+        return $this->dispatch($params)['decoded'];
+    }
+
+    /**
+     * One signed API dispatch: pacing, transport, status handling, decode.
+     *
+     * M-05 [review lastfm__srphp M03]: the old shape returned bare `?array`,
+     * which threw away the HTTP status and headers — the very signals that
+     * separate a retryable hiccup (transport drop, 429, 5xx, envelope 29)
+     * from a terminal rejection. The dispatch result is the parsed boundary
+     * the classification layer reads instead of guessing.
+     *
+     * The runner result is normalized here (contract: `array{status:int,
+     * body:string, headers?:array}`): a third-party runner missing keys can
+     * only degrade to a zero-status transport failure, never an explosion.
+     *
+     * @param array<string, string> $params
+     *
+     * @return array{status: int, decoded: array<string,mixed>|null, headers: array<array-key, mixed>}
+     */
+    private function dispatch(array $params): array
+    {
+        $this->pace();
+
         $body = http_build_query($params, '', '&', PHP_QUERY_RFC3986);
         $headers = [
             'Content-Type'   => 'application/x-www-form-urlencoded',
@@ -252,26 +306,25 @@ class LastfmApi
             'User-Agent'     => 'phlix/last.fm (+https://github.com/detain/phlix-server)',
         ];
 
-        $result = ($this->http)(self::API_ROOT, $body, $headers);
-        $status = $result['status'];
-        $payload = $result['body'];
+        /** @var array<array-key, mixed> $raw */
+        $raw = ($this->http)(self::API_ROOT, $body, $headers);
+        $status = isset($raw['status']) && is_numeric($raw['status']) ? (int) $raw['status'] : 0;
+        $payload = isset($raw['body']) && is_string($raw['body']) ? $raw['body'] : '';
+        /** @var array<array-key, mixed> $responseHeaders */
+        $responseHeaders = isset($raw['headers']) && is_array($raw['headers']) ? $raw['headers'] : [];
 
         if ($status < 200 || $status >= 300) {
             $this->logger->warning('Last.fm API returned non-2xx', [
                 'status' => $status,
                 'method' => $params['method'] ?? null,
             ]);
-            return null;
+            // Last.fm also serves the JSON error envelope on 4xx bodies —
+            // decoding it here costs nothing and feeds the classifier.
+            return ['status' => $status, 'decoded' => self::decodeObject($payload), 'headers' => $responseHeaders];
         }
 
-        /** @var mixed $decoded */
-        $decoded = json_decode($payload, true);
-        if (!is_array($decoded)) {
-            return null;
-        }
-        /** @var array<string, mixed> $decodedArr */
-        $decodedArr = $decoded;
-        if (isset($decodedArr['error'])) {
+        $decoded = self::decodeObject($payload);
+        if ($decoded !== null && isset($decoded['error'])) {
             // M-04 [review lastfm__srphp M04]: Last.fm signals a revoked or
             // stale session as HTTP 200 + error envelope; the non-2xx branch
             // above was the only site that ever logged, so a permanently
@@ -279,27 +332,110 @@ class LastfmApi
             // no request credentials (api_key/sk are request-side), so the
             // code+message are safe to log.
             $this->logger->warning('Last.fm API error envelope', [
-                'error'   => self::envelopeCode($decodedArr),
-                'message' => self::envelopeMessage($decodedArr),
+                'error'   => self::envelopeCode($decoded),
+                'message' => self::envelopeMessage($decoded),
                 'method'  => $params['method'] ?? null,
             ]);
         }
-        return $decodedArr;
+        return ['status' => $status, 'decoded' => $decoded, 'headers' => $responseHeaders];
     }
 
     /**
-     * Map a decoded 2xx body to a typed outcome: an `error` envelope is a
-     * failure carrying its (cast-guarded) code/message; anything else is
-     * accepted outright.
+     * Enforce the per-instance pacing floor before a dispatch [M-05].
      *
-     * @param array<string, mixed> $response
+     * Under Swoole coroutine hooks `usleep` yields instead of blocking the
+     * worker, and the fallback stream runner is a blocking path anyway — the
+     * wait is correct in both. Non-positive intervals disable the gate.
      */
-    private static function outcomeFrom(array $response): LastfmOutcome
+    private function pace(): void
     {
-        if (isset($response['error'])) {
-            return LastfmOutcome::failure(self::envelopeCode($response), self::envelopeMessage($response));
+        if ($this->minIntervalSeconds <= 0.0) {
+            return;
         }
-        return LastfmOutcome::success();
+        $now = microtime(true);
+        if ($this->lastDispatchAt !== null) {
+            $due = $this->lastDispatchAt + $this->minIntervalSeconds;
+            if ($now < $due) {
+                usleep((int) round(($due - $now) * 1_000_000));
+            }
+        }
+        $this->lastDispatchAt = microtime(true);
+    }
+
+    /**
+     * The typed failure verdict for a dispatch that did not succeed
+     * [review lastfm__srphp M03].
+     *
+     * Transient ⟺ transport drop (status 0), HTTP 429, HTTP >= 500, or an
+     * envelope carrying {@see self::RATE_LIMIT_ENVELOPE_CODE}. Everything
+     * else (permission, invalid params, item shapes, unparseable 2xx) is
+     * terminal — replaying it would fail identically. Retry-After (seconds
+     * form) is attached only to transient verdicts.
+     *
+     * @param array{status: int, decoded: array<string,mixed>|null, headers: array<array-key, mixed>} $response
+     */
+    private static function failureOutcome(array $response): LastfmOutcome
+    {
+        $decoded = $response['decoded'];
+        $status = $response['status'];
+
+        if ($decoded !== null && isset($decoded['error'])) {
+            $code = self::envelopeCode($decoded);
+            $transient = $code === self::RATE_LIMIT_ENVELOPE_CODE || $status === 429 || $status >= 500;
+            return LastfmOutcome::failure(
+                $code,
+                self::envelopeMessage($decoded),
+                $transient,
+                $transient ? self::retryAfterSeconds($response['headers']) : null,
+            );
+        }
+
+        $transient = $status === 0 || $status === 429 || $status >= 500;
+        return LastfmOutcome::failure(
+            null,
+            null,
+            $transient,
+            $transient ? self::retryAfterSeconds($response['headers']) : null,
+        );
+    }
+
+    /**
+     * `Retry-After` in seconds form, case-insensitively, list-value
+     * tolerant (PSR-7 runners hand back arrays). The HTTP-date variant is
+     * deliberately unsupported: Last.fm throttles with delta-seconds, and
+     * silently mis-parsing a date would be worse than ignoring it.
+     *
+     * @param array<array-key, mixed> $headers
+     */
+    private static function retryAfterSeconds(array $headers): ?int
+    {
+        foreach ($headers as $name => $value) {
+            if (!is_string($name) || strcasecmp($name, 'Retry-After') !== 0) {
+                continue;
+            }
+            if (is_array($value)) {
+                $value = reset($value);
+            }
+            return is_numeric($value) ? max(0, (int) $value) : null;
+        }
+        return null;
+    }
+
+    /**
+     * Decode a JSON object body, or null for anything else.
+     *
+     * @return array<string,mixed>|null
+     */
+    private static function decodeObject(string $payload): ?array
+    {
+        /** @var mixed $decoded */
+        $decoded = json_decode($payload, true);
+        if (!is_array($decoded)) {
+            return null;
+        }
+        /** @var array<string, mixed> $arr */
+        $arr = $decoded;
+        return $arr;
     }
 
     /**
@@ -420,9 +556,11 @@ class LastfmApi
      *
      * Transport errors (DNS failure, connection refused, timeout) result in
      * a zero-status response so the caller can distinguish them from 2xx
-     * responses via the status code.
+     * responses via the status code. Response headers are parsed from
+     * `$http_response_header` (M-05 needs Retry-After; duplicate header
+     * names collapse last-wins, which Retry-After never legitimately hits).
      *
-     * @return callable(string $url, string $body, array<string, string> $headers): array{status: int, body: string}
+     * @return callable(string $url, string $body, array<string, string> $headers): array{status: int, body: string, headers: array<string, string>}
      */
     public static function defaultHttp(): callable
     {
@@ -447,7 +585,24 @@ class LastfmApi
             if ($statusLine !== '' && preg_match('#HTTP/\S+\s+(\d{3})#', $statusLine, $m) === 1) {
                 $status = (int) $m[1];
             }
-            return ['status' => $status, 'body' => is_string($response) ? $response : ''];
+            $responseHeaders = [];
+            if (isset($http_response_header[0])) {
+                foreach ($http_response_header as $line) {
+                    $colon = strpos($line, ':');
+                    if ($colon === false) {
+                        continue;
+                    }
+                    $name = trim(substr($line, 0, $colon));
+                    if ($name !== '') {
+                        $responseHeaders[$name] = ltrim(substr($line, $colon + 1));
+                    }
+                }
+            }
+            return [
+                'status' => $status,
+                'body' => is_string($response) ? $response : '',
+                'headers' => $responseHeaders,
+            ];
         };
     }
 }

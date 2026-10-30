@@ -50,6 +50,10 @@ final class LastfmOutcome
      *                                  (null = not reported — shape variance kept permissive).
      * @param int|null    $ignored      Scrobble verdict: `@attr` ignored count (null = not reported).
      * @param string|null $ignoreReason Per-scrobble ignore reason (banned/duplicate/…) when reported.
+     * @param bool        $transient    M-05: the failure is retryable (transport drop,
+     *                                  429/>=500, or envelope rate-limit 29) rather than terminal.
+     * @param int|null    $retryAfterSeconds Seconds the server asked us to wait (Retry-After
+     *                                  header, seconds form), when it said so.
      */
     private function __construct(
         public readonly bool $success,
@@ -58,6 +62,8 @@ final class LastfmOutcome
         public readonly ?int $accepted = null,
         public readonly ?int $ignored = null,
         public readonly ?string $ignoreReason = null,
+        public readonly bool $transient = false,
+        public readonly ?int $retryAfterSeconds = null,
     ) {
     }
 
@@ -70,10 +76,18 @@ final class LastfmOutcome
     /**
      * The call was not accepted — by envelope code (when the API answered)
      * or silently (transport failure / non-2xx / unparseable body).
+     *
+     * `$transient`/`$retryAfterSeconds` carry the M-05 retry verdict so
+     * callers branch on the typed facet instead of re-reading codes; the
+     * defaults keep every pre-M-05 call site (and terminal failure) honest.
      */
-    public static function failure(?int $errorCode = null, ?string $errorMessage = null): self
-    {
-        return new self(false, $errorCode, $errorMessage);
+    public static function failure(
+        ?int $errorCode = null,
+        ?string $errorMessage = null,
+        bool $transient = false,
+        ?int $retryAfterSeconds = null,
+    ): self {
+        return new self(false, $errorCode, $errorMessage, null, null, null, $transient, $retryAfterSeconds);
     }
 
     /**
@@ -139,6 +153,12 @@ final class LastfmOutcome
         }
         if ($this->ignoreReason !== null) {
             $context['ignore_reason'] = $this->ignoreReason;
+        }
+        if ($this->transient) {
+            $context['transient'] = 1;
+            if ($this->retryAfterSeconds !== null) {
+                $context['retry_after_seconds'] = $this->retryAfterSeconds;
+            }
         }
         return $context;
     }

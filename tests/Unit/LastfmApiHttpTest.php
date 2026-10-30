@@ -194,5 +194,93 @@ final class LastfmApiHttpTest extends TestCase
         $this->assertFalse($outcome->success);
         $this->assertNull($outcome->errorCode);
         $this->assertNull($outcome->errorMessage);
+        $this->assertTrue($outcome->transient, 'transport failure must classify as transient [M-05]');
+    }
+
+    /**
+     * M-05 [review lastfm__srphp M-03]: transient vs terminal must be a
+     * typed verdict on the outcome. Classification law: status 0
+     * (transport), 429 and >=500 are transient; a 2xx error envelope with
+     * code 29 (application rate limit) is transient; other envelope codes
+     * (e.g. 16 permission denied) and unparseable 2xx bodies are terminal.
+     * Retry-After is honored from the response headers (seconds form).
+     */
+    public function testTransientAndTerminalClassificationMatrix(): void
+    {
+        $script = static fn (array $response): callable => static function () use ($response): array {
+            /** @var array{status:int, body:string, headers?:array<string,string|list<string>>} $response */
+            return $response;
+        };
+
+        $cases = [
+            '429 + Retry-After' => [
+                ['status' => 429, 'body' => '', 'headers' => ['Retry-After' => '7']],
+                true, 7,
+            ],
+            '5xx' => [['status' => 500, 'body' => ''], true, null],
+            '200 + envelope 29' => [
+                ['status' => 200, 'body' => '{"error":29,"message":"Application rate limit exceeded"}', 'headers' => []],
+                true, null,
+            ],
+            '200 + envelope 16 (terminal)' => [
+                ['status' => 200, 'body' => '{"error":16,"message":"Permission denied"}', 'headers' => []],
+                false, null,
+            ],
+            '200 + unparseable (terminal, code-less)' => [
+                ['status' => 200, 'body' => '<html>gateway hiccup</html>', 'headers' => []],
+                false, null,
+            ],
+        ];
+
+        foreach ($cases as $label => [$responses, $expectTransient, $expectRetryAfter]) {
+            $api = new LastfmApi('API_KEY', 'SHARED_SECRET', null, $script($responses), 0.0);
+            $outcome = $api->updateNowPlaying('SESSION_KEY', 'Track', 'Artist');
+            $this->assertFalse($outcome->success, $label);
+            $this->assertSame($expectTransient, $outcome->transient, $label);
+            $this->assertSame($expectRetryAfter, $outcome->retryAfterSeconds, $label);
+        }
+    }
+
+    /** Header lookup for Retry-After is case-insensitive and list-tolerant. */
+    public function testRetryAfterHeaderIsCaseInsensitiveAcrossRunnerShapes(): void
+    {
+        $http = static fn (): array => [
+            'status' => 503,
+            'body' => '',
+            'headers' => ['rEtRy-AfTeR' => ['12']],
+        ];
+        $api = new LastfmApi('K', 'S', null, $http, 0.0);
+        $outcome = $api->scrobble('SK', 'T', 'A', null, 123);
+        $this->assertTrue($outcome->transient);
+        $this->assertSame(12, $outcome->retryAfterSeconds);
+    }
+
+    /**
+     * M-05 pacing: the API self-paces per instance. With a 0.05s minimum
+     * interval, two dispatches must be at least ~50ms apart; with 0.0 the
+     * gate is disabled (test hosts use the disabled form).
+     */
+    public function testMinimumIntervalPacesConsecutiveDispatches(): void
+    {
+        $calls = 0;
+        $http = static function () use (&$calls): array {
+            $calls++;
+            return ['status' => 200, 'body' => '{"ok":1}'];
+        };
+
+        $paced = new LastfmApi('K', 'S', null, $http, 0.05);
+        $start = microtime(true);
+        $paced->updateNowPlaying('SK', 'T1', 'A');
+        $paced->updateNowPlaying('SK', 'T2', 'A');
+        $elapsed = microtime(true) - $start;
+
+        $this->assertSame(2, $calls);
+        $this->assertGreaterThanOrEqual(0.045, $elapsed, 'second dispatch must wait out the pacing window');
+
+        $unpaced = new LastfmApi('K', 'S', null, $http, 0.0);
+        $start = microtime(true);
+        $unpaced->updateNowPlaying('SK', 'T1', 'A');
+        $unpaced->updateNowPlaying('SK', 'T2', 'A');
+        $this->assertLessThan(0.04, microtime(true) - $start, 'interval 0 disables pacing');
     }
 }

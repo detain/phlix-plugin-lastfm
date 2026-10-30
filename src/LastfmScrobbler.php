@@ -45,6 +45,37 @@ class LastfmScrobbler
     /** Conversion factor: 100-ns ticks → seconds. */
     private const TICKS_PER_SECOND = 10_000_000;
 
+    /**
+     * M-05 [review lastfm__srphp M03]: bound of the in-process transient
+     * scrobble retry queue. Overflow drops the OLDEST pending submission
+     * (with a warning) — a bounded memory ceiling beats unbounded growth
+     * during a long Last.fm outage.
+     */
+    public const MAX_RETRY_QUEUE_SIZE = 50;
+
+    /**
+     * M-05: total attempts per scrobble (the live one that queued it plus
+     * replays). Scrobble timestamps are explicit and Last.fm dedups, so
+     * late replay is safe; after the cap the job is dropped with a warning.
+     */
+    public const MAX_SCROBBLE_ATTEMPTS = 3;
+
+    /** M-05: replay budget per stop event — keeps one event from blocking the worker on a full queue. */
+    private const MAX_DRAIN_PER_EVENT = 5;
+
+    /** M-05: backoff applied to a re-queued job when the server sent no Retry-After. */
+    private const DEFAULT_RETRY_BACKOFF_SECONDS = 60.0;
+
+    /**
+     * Pending scrobbles whose live attempt hit a TRANSIENT failure.
+     * Process-local by design: a restart loses the queue (each eventual
+     * drop is at least loud in logs; durable offline queues are a
+     * host-level concern, out of plugin scope) [review lastfm__srphp M03].
+     *
+     * @var list<array{user_id:string,session_key:string,track:string,artist:string,album:?string,timestamp:int,attempts:int,not_before:float}>
+     */
+    private array $scrobbleRetryQueue = [];
+
     private LoggerInterface $logger;
 
     /**
@@ -169,6 +200,9 @@ class LastfmScrobbler
                 'user_id' => $event->userId,
             ]);
             $this->purgeSessionIfInvalid($outcome, $event->userId);
+            // M-05 note: transient now-playing failures are deliberately NOT
+            // retried — "now playing" is ephemeral state that the next
+            // event supersedes; replaying stale status would be a lie.
         }
     }
 
@@ -212,6 +246,10 @@ class LastfmScrobbler
     private function handlePlaybackStopped(PlaybackStopped $event): void
     {
         $this->ensureSchema();
+        // M-05: replay due transients first — the queue rides on real stop
+        // events, so no timer/worker is needed (scrobbles carry explicit
+        // timestamps; Last.fm dedups, late arrival is spec-legal).
+        $this->drainRetryQueue();
         $session = $this->sessions->findByUserId($event->userId);
         if ($session === null) {
             return;
@@ -241,21 +279,134 @@ class LastfmScrobbler
             return;
         }
 
+        $startedAt = time() - $playedSeconds;
         $outcome = $this->api->scrobble(
             $session['session_key'],
             $title,
             $artist,
             is_string($track['album'] ?? null) ? $track['album'] : null,
-            time() - $playedSeconds,
+            $startedAt,
         );
         // M-04 [review lastfm__srphp M04] twin of the now-playing path:
         // failed submissions are logged, never dropped.
-        if (!$outcome->success) {
-            $this->logger->warning('Last.fm scrobble submission failed', $outcome->logContext() + [
-                'user_id' => $event->userId,
-            ]);
-            $this->purgeSessionIfInvalid($outcome, $event->userId);
+        if ($outcome->success) {
+            return;
         }
+        $this->logger->warning('Last.fm scrobble submission failed', $outcome->logContext() + [
+            'user_id' => $event->userId,
+        ]);
+        if ($outcome->isInvalidSession()) {
+            $this->purgeSessionIfInvalid($outcome, $event->userId);
+            return;
+        }
+        // M-05 [review lastfm__srphp M03]: a transient failure is NOT the end
+        // of the story — queue the submission for replay (attempt 1 spent).
+        if ($outcome->transient) {
+            $this->enqueueScrobble([
+                'user_id'     => $event->userId,
+                'session_key' => $session['session_key'],
+                'track'       => $title,
+                'artist'      => $artist,
+                'album'       => is_string($track['album'] ?? null) ? $track['album'] : null,
+                'timestamp'   => $startedAt,
+                'attempts'    => 1,
+                'not_before'  => microtime(true) + (float) ($outcome->retryAfterSeconds ?? 0),
+            ]);
+            $this->logger->warning('Last.fm scrobble queued for retry', [
+                'user_id'            => $event->userId,
+                'attempt'            => 1,
+                'retry_after_seconds' => $outcome->retryAfterSeconds,
+                'queue_size'         => count($this->scrobbleRetryQueue),
+            ]);
+        }
+    }
+
+    /**
+     * Replay due entries of the transient retry queue [M-05].
+     *
+     * Budgeted ({@see self::MAX_DRAIN_PER_EVENT} per event) so a long
+     * outage cannot turn one stop event into a blocking burst; immature
+     * jobs (Retry-After not elapsed) stay put. Runs inside the M-06
+     * containment boundary of the stop handler.
+     */
+    private function drainRetryQueue(): void
+    {
+        if ($this->scrobbleRetryQueue === []) {
+            return;
+        }
+        $pending = $this->scrobbleRetryQueue;
+        $this->scrobbleRetryQueue = [];
+        $budget = self::MAX_DRAIN_PER_EVENT;
+        $now = microtime(true);
+
+        foreach ($pending as $job) {
+            if ($budget <= 0 || $job['not_before'] > $now) {
+                $this->scrobbleRetryQueue[] = $job;
+                continue;
+            }
+            $budget--;
+            $outcome = $this->api->scrobble(
+                $job['session_key'],
+                $job['track'],
+                $job['artist'],
+                $job['album'],
+                $job['timestamp'],
+            );
+            if ($outcome->success) {
+                continue;
+            }
+            $this->logger->warning('Last.fm queued scrobble attempt failed', $outcome->logContext() + [
+                'user_id'  => $job['user_id'],
+                'attempts' => $job['attempts'],
+            ]);
+            if ($outcome->isInvalidSession()) {
+                $this->purgeSessionIfInvalid($outcome, $job['user_id']);
+                continue;
+            }
+            if ($outcome->transient && $job['attempts'] < self::MAX_SCROBBLE_ATTEMPTS) {
+                $job['attempts']++;
+                $job['not_before'] = microtime(true)
+                    + (float) ($outcome->retryAfterSeconds ?? self::DEFAULT_RETRY_BACKOFF_SECONDS);
+                $this->enqueueScrobble($job);
+                continue;
+            }
+            $this->logger->warning('Last.fm queued scrobble dropped after exhausting retries', [
+                'user_id'       => $job['user_id'],
+                'attempts'      => $job['attempts'],
+                'track'         => $job['track'],
+                'artist'        => $job['artist'],
+                'max_attempts'  => self::MAX_SCROBBLE_ATTEMPTS,
+            ]);
+        }
+    }
+
+    /**
+     * Append to the bounded queue, evicting the oldest entry (loudly) past
+     * the ceiling [M-05].
+     *
+     * @param array{user_id:string,session_key:string,track:string,artist:string,album:?string,timestamp:int,attempts:int,not_before:float} $job
+     */
+    private function enqueueScrobble(array $job): void
+    {
+        $this->scrobbleRetryQueue[] = $job;
+        while (count($this->scrobbleRetryQueue) > self::MAX_RETRY_QUEUE_SIZE) {
+            array_shift($this->scrobbleRetryQueue);
+            $this->logger->warning('Last.fm scrobble retry queue overflow — oldest submission dropped', [
+                'max_queue_size' => self::MAX_RETRY_QUEUE_SIZE,
+            ]);
+        }
+    }
+
+    /**
+     * A dead credential's pending replays are dead too: drop the user's
+     * queued jobs when their session is purged [M-05 × M-02].
+     */
+    private function dropQueuedForUser(string $userId): void
+    {
+        $this->scrobbleRetryQueue = array_values(array_filter(
+            $this->scrobbleRetryQueue,
+            static fn (array $job): bool => $job['user_id'] !== $userId,
+        ));
     }
 
     /**
@@ -278,6 +429,7 @@ class LastfmScrobbler
         }
         try {
             $this->sessions->delete($userId);
+            $this->dropQueuedForUser($userId);
             $this->logger->warning('Last.fm session cleared — the API rejected the stored session key; reconnect required', [
                 'user_id'    => $userId,
                 'error_code' => $outcome->errorCode,
