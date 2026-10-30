@@ -82,8 +82,8 @@ final class LastfmApiHttpTest extends TestCase
         $api = new LastfmApi('API_KEY', 'SHARED_SECRET', $logger, $http);
         $result = $api->updateNowPlaying('SESSION_KEY', 'Track', 'Artist');
 
-        // Must return false on non-2xx, not null.
-        $this->assertFalse($result);
+        // Must return a failure outcome on non-2xx, not throw or fake success.
+        $this->assertFalse($result->success);
 
         // Warning log must be emitted, not silent.
         $this->assertCount(1, $warnings);
@@ -105,8 +105,8 @@ final class LastfmApiHttpTest extends TestCase
         $result = $api->updateNowPlaying('SESSION_KEY', 'Track', 'Artist');
 
         // Transport errors are distinguishable from API errors.
-        // status=0 is not 2xx, so result should be false (not null).
-        $this->assertFalse($result);
+        // status=0 is not 2xx, so the outcome must be a failure (not success).
+        $this->assertFalse($result->success);
         $this->assertNotNull($captured['url']);
         $this->assertSame(LastfmApi::API_ROOT, $captured['url']);
     }
@@ -126,5 +126,73 @@ final class LastfmApiHttpTest extends TestCase
 
         // The default runner should not be null.
         $this->assertNotNull($http);
+    }
+
+    /**
+     * M-04 [review lastfm__srphp M04] — Last.fm answers a revoked session
+     * with HTTP **200** and an error envelope in the body. That path must
+     * be logged (the non-2xx branch was the only site that ever was), and
+     * the failure must reach the caller as a typed outcome — response
+     * fields carry no request credentials, so the envelope is log-safe.
+     */
+    public function test200ErrorEnvelopeIsLoggedAndSurfacedAsTypedFailure(): void
+    {
+        $warnings = [];
+
+        $logger = new class ($warnings) extends NullLogger {
+            /** @var array<int, array{message: string, context: array<string, mixed>}> */
+            private array $warningsRef;
+
+            public function __construct(array &$warningsRef)
+            {
+                $this->warningsRef = &$warningsRef;
+            }
+
+            public function warning($message, array $context = []): void
+            {
+                $this->warningsRef[] = ['message' => $message, 'context' => $context];
+            }
+        };
+
+        $http = static function (): array {
+            return [
+                'status' => 200,
+                'body' => '{"error":9,"message":"Invalid session key - Please re-authenticate"}',
+            ];
+        };
+
+        $api = new LastfmApi('API_KEY', 'SHARED_SECRET', $logger, $http);
+        $outcome = $api->updateNowPlaying('SESSION_KEY', 'Track', 'Artist');
+
+        $this->assertFalse($outcome->success, 'error-in-200 must not surface as success');
+        $this->assertSame(9, $outcome->errorCode);
+        $this->assertSame('Invalid session key - Please re-authenticate', $outcome->errorMessage);
+
+        $envelopeLogs = array_values(array_filter(
+            $warnings,
+            static fn (array $w): bool => $w['message'] === 'Last.fm API error envelope',
+        ));
+        $this->assertCount(1, $envelopeLogs, 'the error-in-200 path must be logged once');
+        $this->assertSame(9, $envelopeLogs[0]['context']['error']);
+        $this->assertSame('track.updateNowPlaying', $envelopeLogs[0]['context']['method']);
+        $this->assertStringContainsString('Invalid session key', (string) $envelopeLogs[0]['context']['message']);
+    }
+
+    /**
+     * A transport/non-2xx failure (decoded body unavailable) surfaces as a
+     * typed failure with no error code — still never a success.
+     */
+    public function testTransportFailureSurfacesAsTypedFailureWithoutCode(): void
+    {
+        $http = static function (): array {
+            return ['status' => 0, 'body' => ''];
+        };
+
+        $api = new LastfmApi('API_KEY', 'SHARED_SECRET', null, $http);
+        $outcome = $api->updateNowPlaying('SESSION_KEY', 'Track', 'Artist');
+
+        $this->assertFalse($outcome->success);
+        $this->assertNull($outcome->errorCode);
+        $this->assertNull($outcome->errorMessage);
     }
 }

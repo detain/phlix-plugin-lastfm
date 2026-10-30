@@ -114,8 +114,11 @@ class LastfmApi
     /**
      * Notify Last.fm that the user has just begun listening to a track.
      *
-     * Calls `track.updateNowPlaying`. Returns true on a 200 response with
-     * no `error` field — false on any other outcome.
+     * Calls `track.updateNowPlaying`. Returns a typed {@see LastfmOutcome}:
+     * success requires a 2xx response with no `error` envelope — any other
+     * outcome (transport failure, non-2xx, unparseable body, or the
+     * error-in-200 that Last.fm uses for revoked sessions) surfaces as a
+     * failure carrying the envelope's code/message when available.
      *
      * @param string $sessionKey Authenticated session key from {@see getSession()}.
      * @param string $track      Track title.
@@ -127,7 +130,7 @@ class LastfmApi
         string $track,
         string $artist,
         ?string $album = null,
-    ): bool {
+    ): LastfmOutcome {
         $params = [
             'method'  => 'track.updateNowPlaying',
             'api_key' => $this->apiKey,
@@ -142,7 +145,7 @@ class LastfmApi
         $params['format']  = 'json';
 
         $response = $this->call($params);
-        return $response !== null && !isset($response['error']);
+        return $response === null ? LastfmOutcome::failure() : self::outcomeFrom($response);
     }
 
     /**
@@ -166,7 +169,7 @@ class LastfmApi
         string $artist,
         ?string $album = null,
         ?int $timestamp = null,
-    ): bool {
+    ): LastfmOutcome {
         $params = [
             'method'    => 'track.scrobble',
             'api_key'   => $this->apiKey,
@@ -182,7 +185,7 @@ class LastfmApi
         $params['format']  = 'json';
 
         $response = $this->call($params);
-        return $response !== null && !isset($response['error']);
+        return $response === null ? LastfmOutcome::failure() : self::outcomeFrom($response);
     }
 
     /**
@@ -256,7 +259,58 @@ class LastfmApi
         }
         /** @var array<string, mixed> $decodedArr */
         $decodedArr = $decoded;
+        if (isset($decodedArr['error'])) {
+            // M-04 [review lastfm__srphp M04]: Last.fm signals a revoked or
+            // stale session as HTTP 200 + error envelope; the non-2xx branch
+            // above was the only site that ever logged, so a permanently
+            // broken integration was silent forever. Response bodies carry
+            // no request credentials (api_key/sk are request-side), so the
+            // code+message are safe to log.
+            $this->logger->warning('Last.fm API error envelope', [
+                'error'   => self::envelopeCode($decodedArr),
+                'message' => self::envelopeMessage($decodedArr),
+                'method'  => $params['method'] ?? null,
+            ]);
+        }
         return $decodedArr;
+    }
+
+    /**
+     * Map a decoded 2xx body to a typed outcome: an `error` envelope is a
+     * failure carrying its (cast-guarded) code/message; anything else is
+     * accepted outright.
+     *
+     * @param array<string, mixed> $response
+     */
+    private static function outcomeFrom(array $response): LastfmOutcome
+    {
+        if (isset($response['error'])) {
+            return LastfmOutcome::failure(self::envelopeCode($response), self::envelopeMessage($response));
+        }
+        return LastfmOutcome::success();
+    }
+
+    /**
+     * Envelope `error` as int, or null when absent/non-numeric — shape
+     * variance must never explode the parser.
+     *
+     * @param array<string, mixed> $response
+     */
+    private static function envelopeCode(array $response): ?int
+    {
+        $raw = $response['error'] ?? null;
+        return is_numeric($raw) ? (int) $raw : null;
+    }
+
+    /**
+     * Envelope `message` as string, or null when absent/non-string.
+     *
+     * @param array<string, mixed> $response
+     */
+    private static function envelopeMessage(array $response): ?string
+    {
+        $raw = $response['message'] ?? null;
+        return is_string($raw) ? $raw : null;
     }
 
     /**

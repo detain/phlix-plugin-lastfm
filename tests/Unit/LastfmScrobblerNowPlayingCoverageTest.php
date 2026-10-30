@@ -13,6 +13,7 @@ namespace Phlix\Tests\Unit\Plugins\Scrobbler\Lastfm;
 
 use PHPUnit\Framework\TestCase;
 use Phlix\Plugins\Scrobbler\Lastfm\LastfmApi;
+use Phlix\Plugins\Scrobbler\Lastfm\LastfmOutcome;
 use Phlix\Plugins\Scrobbler\Lastfm\LastfmScrobbler;
 use Phlix\Plugins\Scrobbler\Lastfm\LastfmSessionRepository;
 use Phlix\Shared\Events\Playback\PlaybackStarted;
@@ -140,7 +141,7 @@ final class LastfmScrobblerNowPlayingCoverageTest extends TestCase
         $this->api->expects(self::once())->method('scrobble')
             ->willReturnCallback(function (string $sk, string $track, string $artist, ?string $album, ?int $timestamp) use (&$capturedTimestamp) {
                 $capturedTimestamp = $timestamp;
-                return true;
+                return LastfmOutcome::success();
             });
 
         $scrobbler = $this->buildScrobbler(static fn (string $_id) => [

@@ -13,10 +13,12 @@ namespace Phlix\Tests\Unit\Plugins\Scrobbler\Lastfm;
 
 use PHPUnit\Framework\TestCase;
 use Phlix\Plugins\Scrobbler\Lastfm\LastfmApi;
+use Phlix\Plugins\Scrobbler\Lastfm\LastfmOutcome;
 use Phlix\Plugins\Scrobbler\Lastfm\LastfmScrobbler;
 use Phlix\Plugins\Scrobbler\Lastfm\LastfmSessionRepository;
 use Phlix\Shared\Events\Playback\PlaybackStarted;
 use Phlix\Shared\Events\Playback\PlaybackStopped;
+use Psr\Log\NullLogger;
 
 /**
  * Unit tests for {@see LastfmScrobbler}.
@@ -78,7 +80,8 @@ final class LastfmScrobblerTest extends TestCase
         ]);
         $this->api->expects(self::once())
             ->method('updateNowPlaying')
-            ->with('SK', 'Song', 'Artist', 'Album');
+            ->with('SK', 'Song', 'Artist', 'Album')
+            ->willReturn(LastfmOutcome::success());
 
         $scrobbler = $this->buildScrobbler(static fn (string $_id) => [
             'title' => 'Song', 'artist' => 'Artist', 'album' => 'Album', 'duration_seconds' => 200,
@@ -108,7 +111,8 @@ final class LastfmScrobblerTest extends TestCase
         $playedSeconds = 101; // > 50% of 200s
         $this->api->expects(self::once())
             ->method('scrobble')
-            ->with('SK', 'Song', 'Artist', null, self::isType('integer'));
+            ->with('SK', 'Song', 'Artist', null, self::isType('integer'))
+            ->willReturn(LastfmOutcome::success());
 
         $scrobbler = $this->buildScrobbler(static fn (string $_id) => [
             'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
@@ -157,10 +161,88 @@ final class LastfmScrobblerTest extends TestCase
     }
 
     /**
+     * M-04 [review lastfm__srphp M04] — a failed API outcome must never be
+     * silently discarded: the now-playing path logs a warning carrying the
+     * typed error fields (response-side only; no credentials).
+     */
+    public function testOnPlaybackStartedLogsWarningWhenNowPlayingFails(): void
+    {
+        $this->sessions->method('findByUserId')->willReturn([
+            'user_id' => 'u1', 'session_key' => 'SK', 'connected_at' => '2024-01-01 00:00:00',
+        ]);
+        $this->api->method('updateNowPlaying')
+            ->willReturn(LastfmOutcome::failure(9, 'Invalid session key - Please re-authenticate'));
+
+        /** @var array<int, array{message: string, context: array<string, mixed>}> $warnings */
+        $warnings = [];
+        $logger = $this->warningCollector($warnings);
+
+        $scrobbler = $this->buildScrobbler(static fn (string $_id) => [
+            'title' => 'Song', 'artist' => 'Artist', 'album' => 'Album', 'duration_seconds' => 200,
+        ], $logger);
+
+        $scrobbler->onPlaybackStarted(new PlaybackStarted('sess', 'u1', 'media-1', 'device', 0));
+
+        $this->assertCount(1, $warnings);
+        $this->assertSame('Last.fm now-playing update failed', $warnings[0]['message']);
+        $this->assertSame('u1', $warnings[0]['context']['user_id']);
+        $this->assertSame(9, $warnings[0]['context']['error_code']);
+        $this->assertStringContainsString('Invalid session key', (string) $warnings[0]['context']['error_message']);
+    }
+
+    /**
+     * M-04 [review lastfm__srphp M04] — scrobble-side twin: every failed
+     * submission surfaces as a warning instead of vanishing.
+     */
+    public function testOnPlaybackStoppedLogsWarningWhenScrobbleFails(): void
+    {
+        $this->sessions->method('findByUserId')->willReturn([
+            'user_id' => 'u1', 'session_key' => 'SK', 'connected_at' => '2024-01-01 00:00:00',
+        ]);
+        $this->api->method('scrobble')->willReturn(LastfmOutcome::failure(16, 'Permission denied'));
+
+        /** @var array<int, array{message: string, context: array<string, mixed>}> $warnings */
+        $warnings = [];
+        $logger = $this->warningCollector($warnings);
+
+        $scrobbler = $this->buildScrobbler(static fn (string $_id) => [
+            'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
+        ], $logger);
+
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', 101 * 10_000_000, true));
+
+        $this->assertCount(1, $warnings);
+        $this->assertSame('Last.fm scrobble submission failed', $warnings[0]['message']);
+        $this->assertSame('u1', $warnings[0]['context']['user_id']);
+        $this->assertSame(16, $warnings[0]['context']['error_code']);
+    }
+
+    /**
+     * @param array<int, array{message: string, context: array<string, mixed>}> $warnings
+     */
+    private function warningCollector(array &$warnings): NullLogger
+    {
+        return new class ($warnings) extends NullLogger {
+            /** @var array<int, array{message: string, context: array<string, mixed>}> */
+            private array $warningsRef;
+
+            public function __construct(array &$warningsRef)
+            {
+                $this->warningsRef = &$warningsRef;
+            }
+
+            public function warning($message, array $context = []): void
+            {
+                $this->warningsRef[] = ['message' => (string) $message, 'context' => $context];
+            }
+        };
+    }
+
+    /**
      * @param callable(string): ?array{title: string, artist: string, album: ?string, duration_seconds: ?int} $resolveTrack
      */
-    private function buildScrobbler(callable $resolveTrack): LastfmScrobbler
+    private function buildScrobbler(callable $resolveTrack, ?\Psr\Log\LoggerInterface $logger = null): LastfmScrobbler
     {
-        return new LastfmScrobbler($this->api, $this->sessions, $resolveTrack);
+        return new LastfmScrobbler($this->api, $this->sessions, $resolveTrack, $logger);
     }
 }

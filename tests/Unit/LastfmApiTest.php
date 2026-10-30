@@ -116,13 +116,13 @@ final class LastfmApiTest extends TestCase
         $api = $this->apiWith(200, json_encode([
             'nowplaying' => ['track' => ['#text' => 'Song'], 'artist' => ['#text' => 'Artist']],
         ]));
-        $this->assertTrue($api->updateNowPlaying('SK', 'Song', 'Artist'));
+        $this->assertTrue($api->updateNowPlaying('SK', 'Song', 'Artist')->success);
     }
 
     public function testUpdateNowPlayingReturnsFalseOnApiError(): void
     {
         $api = $this->apiWith(200, json_encode(['error' => 9, 'message' => 'Invalid session key']));
-        $this->assertFalse($api->updateNowPlaying('SK', 'Song', 'Artist'));
+        $this->assertFalse($api->updateNowPlaying('SK', 'Song', 'Artist')->success);
     }
 
     public function testScrobbleReturnsTrueOn200(): void
@@ -130,13 +130,13 @@ final class LastfmApiTest extends TestCase
         $api = $this->apiWith(200, json_encode([
             'scrobbles' => ['scrobble' => ['track' => ['#text' => 'Song']]],
         ]));
-        $this->assertTrue($api->scrobble('SK', 'Song', 'Artist', 'Album', 1700000000));
+        $this->assertTrue($api->scrobble('SK', 'Song', 'Artist', 'Album', 1700000000)->success);
     }
 
     public function testScrobbleReturnsFalseOn500(): void
     {
         $api = $this->apiWith(500, '');
-        $this->assertFalse($api->scrobble('SK', 'Song', 'Artist'));
+        $this->assertFalse($api->scrobble('SK', 'Song', 'Artist')->success);
     }
 
     public function testScrobbleIncludesSortedSignatureAndTimestamp(): void

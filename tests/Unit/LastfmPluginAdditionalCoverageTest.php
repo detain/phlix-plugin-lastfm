@@ -12,6 +12,7 @@ declare(strict_types=1);
 namespace Phlix\Tests\Unit\Plugins\Scrobbler\Lastfm;
 
 use Phlix\Plugins\Scrobbler\Lastfm\LastfmApi;
+use Phlix\Plugins\Scrobbler\Lastfm\LastfmOutcome;
 use Phlix\Plugins\Scrobbler\Lastfm\LastfmPlugin;
 use Phlix\Plugins\Scrobbler\Lastfm\LastfmScrobbler;
 use Phlix\Plugins\Scrobbler\Lastfm\LastfmSessionRepository;
@@ -58,7 +59,8 @@ final class LastfmPluginAdditionalCoverageTest extends TestCase
 
         // Expect updateNowPlaying to be called once
         $api->expects(self::once())->method('updateNowPlaying')
-            ->with('SK', 'Test Song', 'Test Artist', 'Test Album');
+            ->with('SK', 'Test Song', 'Test Artist', 'Test Album')
+            ->willReturn(LastfmOutcome::success());
 
         $plugin = new LastfmPlugin();
         $plugin->configure([
@@ -112,7 +114,8 @@ final class LastfmPluginAdditionalCoverageTest extends TestCase
                 'Test Artist',
                 'Test Album',
                 self::anything() // timestamp
-            );
+            )
+            ->willReturn(LastfmOutcome::success());
 
         $plugin = new LastfmPlugin();
         $plugin->configure([

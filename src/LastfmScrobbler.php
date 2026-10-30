@@ -137,12 +137,21 @@ class LastfmScrobbler
         if ($title === null || $artist === null) {
             return;
         }
-        $this->api->updateNowPlaying(
+        $outcome = $this->api->updateNowPlaying(
             $session['session_key'],
             $title,
             $artist,
             is_string($track['album'] ?? null) ? $track['album'] : null,
         );
+        // M-04 [review lastfm__srphp M04]: the bool verdict used to be
+        // discarded — a rejected now-playing update vanished without a
+        // trace. Every failure now leaves a log line (typed outcome
+        // context is response-side only: no credentials).
+        if (!$outcome->success) {
+            $this->logger->warning('Last.fm now-playing update failed', $outcome->logContext() + [
+                'user_id' => $event->userId,
+            ]);
+        }
     }
 
     /**
@@ -184,13 +193,20 @@ class LastfmScrobbler
             return;
         }
 
-        $this->api->scrobble(
+        $outcome = $this->api->scrobble(
             $session['session_key'],
             $title,
             $artist,
             is_string($track['album'] ?? null) ? $track['album'] : null,
             time() - $playedSeconds,
         );
+        // M-04 [review lastfm__srphp M04] twin of the now-playing path:
+        // failed submissions are logged, never dropped.
+        if (!$outcome->success) {
+            $this->logger->warning('Last.fm scrobble submission failed', $outcome->logContext() + [
+                'user_id' => $event->userId,
+            ]);
+        }
     }
 
     /**
