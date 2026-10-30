@@ -244,6 +244,69 @@ final class LastfmScrobblerTest extends TestCase
     }
 
     /**
+     * M-06 [review lastfm__srphp M06] — the host dispatches playback events
+     * with no per-listener isolation (ListenerRegistry): a throw from this
+     * plugin's hook escapes into the request/worker loop. A telemetry-grade
+     * side effect must never break playback: repository/resolver/API throws
+     * are swallowed at the handler boundary and leave one warning line.
+     */
+    public function testOnPlaybackStartedSwallowsThrowingRepositoryAndLogs(): void
+    {
+        $this->sessions->method('findByUserId')
+            ->willThrowException(new \RuntimeException('SQLSTATE[HY000]: MySQL server has gone away'));
+
+        /** @var array<int, array{message: string, context: array<string, mixed>}> $warnings */
+        $warnings = [];
+        $scrobbler = $this->buildScrobbler(static fn (string $_id) => null, $this->warningCollector($warnings));
+
+        $scrobbler->onPlaybackStarted(new PlaybackStarted('sess', 'u1', 'media-1', 'device', 0));
+
+        $this->assertCount(1, $warnings);
+        $this->assertSame('Last.fm playback hook failed', $warnings[0]['message']);
+        $this->assertSame('playback.started', $warnings[0]['context']['hook']);
+        $this->assertSame('u1', $warnings[0]['context']['user_id']);
+        $this->assertStringContainsString('gone away', (string) $warnings[0]['context']['error']);
+    }
+
+    /** M-06 twin: a throwing track resolver is contained on the stopped path. */
+    public function testOnPlaybackStoppedSwallowsThrowingResolverAndLogs(): void
+    {
+        $this->sessions->method('findByUserId')->willReturn([
+            'user_id' => 'u1', 'session_key' => 'SK', 'connected_at' => '2024-01-01 00:00:00',
+        ]);
+        /** @var array<int, array{message: string, context: array<string, mixed>}> $warnings */
+        $warnings = [];
+        $scrobbler = $this->buildScrobbler(static function (string $_id): array {
+            throw new \LogicException('resolver exploded');
+        }, $this->warningCollector($warnings));
+
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', 101 * 10_000_000, true));
+
+        $this->assertCount(1, $warnings);
+        $this->assertSame('Last.fm playback hook failed', $warnings[0]['message']);
+        $this->assertSame('playback.stopped', $warnings[0]['context']['hook']);
+    }
+
+    /** M-06 triple: an API transport throw is contained too. */
+    public function testOnPlaybackStoppedSwallowsThrowingApiAndLogs(): void
+    {
+        $this->sessions->method('findByUserId')->willReturn([
+            'user_id' => 'u1', 'session_key' => 'SK', 'connected_at' => '2024-01-01 00:00:00',
+        ]);
+        $this->api->method('scrobble')->willThrowException(new \RuntimeException('curl error'));
+        /** @var array<int, array{message: string, context: array<string, mixed>}> $warnings */
+        $warnings = [];
+        $scrobbler = $this->buildScrobbler(static fn (string $_id) => [
+            'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
+        ], $this->warningCollector($warnings));
+
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', 101 * 10_000_000, true));
+
+        $this->assertCount(1, $warnings);
+        $this->assertSame('playback.stopped', $warnings[0]['context']['hook']);
+    }
+
+    /**
      * @param array<int, array{message: string, context: array<string, mixed>}> $warnings
      */
     private function warningCollector(array &$warnings): NullLogger

@@ -120,8 +120,25 @@ class LastfmScrobbler
     /**
      * Handle `phlix.playback.started` — sends Now Playing if the user has
      * a Last.fm session.
+     *
+     * M-06 [review lastfm__srphp M06]: the entire body runs inside a
+     * `Throwable` boundary. The host event dispatcher (ListenerRegistry)
+     * invokes each listener WITHOUT isolation, so an escaped throw here —
+     * a dropped MySQL connection under workerman's persistent connections,
+     * a resolver explosion, a transport failure — would break the user's
+     * playback request over a fire-and-forget telemetry side effect. All
+     * failures degrade to one warning line and the event is dropped.
      */
     public function onPlaybackStarted(PlaybackStarted $event): void
+    {
+        try {
+            $this->handlePlaybackStarted($event);
+        } catch (\Throwable $t) {
+            $this->logHookFailure('playback.started', $event->userId, $t);
+        }
+    }
+
+    private function handlePlaybackStarted(PlaybackStarted $event): void
     {
         $this->ensureSchema();
         $session = $this->sessions->findByUserId($event->userId);
@@ -160,8 +177,38 @@ class LastfmScrobbler
      *
      * The rule is enforced here (the underlying {@see LastfmApi::scrobble()}
      * does no gating of its own).
+     *
+     * M-06 [review lastfm__srphp M06] twin of the started path: full
+     * `Throwable` containment — a scrobble failure must never surface in
+     * the user's stop-request flow.
      */
     public function onPlaybackStopped(PlaybackStopped $event): void
+    {
+        try {
+            $this->handlePlaybackStopped($event);
+        } catch (\Throwable $t) {
+            $this->logHookFailure('playback.stopped', $event->userId, $t);
+        }
+    }
+
+    /**
+     * Log one containment warning for a failed playback hook.
+     *
+     * Context carries only exception class/message + user UUID (the
+     * session key is request-side state and is deliberately absent;
+     * DB exception messages contain no credentials).
+     */
+    private function logHookFailure(string $hook, string $userId, \Throwable $t): void
+    {
+        $this->logger->warning('Last.fm playback hook failed', [
+            'hook'      => $hook,
+            'user_id'   => $userId,
+            'exception' => get_class($t),
+            'error'     => $t->getMessage(),
+        ]);
+    }
+
+    private function handlePlaybackStopped(PlaybackStopped $event): void
     {
         $this->ensureSchema();
         $session = $this->sessions->findByUserId($event->userId);
