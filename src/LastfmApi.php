@@ -62,6 +62,15 @@ class LastfmApi
      */
     public const RATE_LIMIT_ENVELOPE_CODE = 29;
 
+    /**
+     * Byte ceiling for inbound `session_key`/`username` values, matching the
+     * VARCHAR(64) columns of `lastfm_sessions`
+     * (src/Database/Migrations/CreateLastfmSessionsTable.php) — oversized
+     * wire values are refused at the API boundary rather than reaching
+     * storage [review lastfm__secaudit m-4].
+     */
+    public const MAX_SESSION_FIELD_BYTES = 64;
+
     private LoggerInterface $logger;
 
     private float $minIntervalSeconds;
@@ -114,8 +123,9 @@ class LastfmApi
      *                      through `https://www.last.fm/api/auth/?api_key=...&token=...`.
      *
      * @return array{session_key: string, username: string}|null
-     *         Hydrated session payload, or null when Last.fm rejected the
-     *         token.
+     *         Hydrated (trimmed, length/control-char checked) session payload,
+     *         or null when Last.fm rejected the token or the response fields
+     *         fail the inbound boundary parse.
      */
     public function getSession(string $token): ?array
     {
@@ -138,10 +148,37 @@ class LastfmApi
         }
         $key = $session['key'] ?? null;
         $name = $session['name'] ?? null;
-        if (!is_string($key) || $key === '' || !is_string($name) || $name === '') {
+        $key = self::normalizeSessionField($key);
+        $name = self::normalizeSessionField($name);
+        if ($key === null || $name === null) {
             return null;
         }
         return ['session_key' => $key, 'username' => $name];
+    }
+
+    /**
+     * Parse a session field arriving from the wire into the shape the
+     * VARCHAR(64) columns accept — trimmed, non-empty, ≤64 bytes, free of
+     * ASCII control characters — or refuse it (null) at the boundary
+     * [review lastfm__secaudit m-4].
+     *
+     * The byte cap is deliberately stricter than the column's character
+     * count: oversized or control-laden values from a hostile/compromised
+     * response never reach storage, independent of the server's sql_mode.
+     */
+    private static function normalizeSessionField(mixed $value): ?string
+    {
+        if (!is_string($value)) {
+            return null;
+        }
+        $trimmed = trim($value);
+        if ($trimmed === '' || strlen($trimmed) > self::MAX_SESSION_FIELD_BYTES) {
+            return null;
+        }
+        if (preg_match('/[\x00-\x1F\x7F]/', $trimmed) === 1) {
+            return null;
+        }
+        return $trimmed;
     }
 
     /**

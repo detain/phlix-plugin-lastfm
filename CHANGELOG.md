@@ -9,6 +9,13 @@ its tag lands (tagging is an owner action).
 
 ### Fixed
 
+- W-min53 minors batch: `LastfmApi::getSession` now parses inbound session
+  fields at the boundary (trimmed, non-empty, ≤64 bytes matching the
+  `VARCHAR(64)` columns, ASCII control chars rejected) so a hostile or
+  compromised Last.fm response can never persist junk into
+  `lastfm_sessions`, and `save()`'s upsert moved from the deprecated
+  `VALUES()` spelling (MySQL 8.0.20+) to the row-alias `AS new` form
+  (8.0.19+), pinned both ways.
 - W-min52 minors batch: the workerman/mysql prepared-statement binding path
   is now exercised end-to-end (`LastfmSessionRepositoryBindingTest` drives
   the real vendor `execute()`/`bindMore()` against a socket-free PDO probe —

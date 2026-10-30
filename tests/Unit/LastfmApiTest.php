@@ -111,6 +111,53 @@ final class LastfmApiTest extends TestCase
         $this->assertNull($api->getSession('TOKEN'));
     }
 
+    public function testGetSessionRejectsOversizedSessionKey(): void
+    {
+        // Columns are VARCHAR(64) (CreateLastfmSessionsTable): a hostile or
+        // compromised response carrying a 65-byte key must be rejected at the
+        // API boundary, not left for sql_mode to truncate. The cap is
+        // byte-based, deliberately stricter than the column's char count.
+        $api = $this->apiWith(200, json_encode([
+            'session' => ['key' => str_repeat('K', 65), 'name' => 'rj'],
+        ]));
+        $this->assertNull($api->getSession('TOKEN'));
+    }
+
+    public function testGetSessionAcceptsExactlySizedSixtyFourByteKey(): void
+    {
+        $api = $this->apiWith(200, json_encode([
+            'session' => ['key' => str_repeat('K', 64), 'name' => 'rj'],
+        ]));
+        $session = $api->getSession('TOKEN');
+        $this->assertNotNull($session);
+        $this->assertSame(64, strlen($session['session_key']));
+    }
+
+    public function testGetSessionRejectsControlCharactersInUsername(): void
+    {
+        // Raw control chars in `username` must not persist (secaudit m-4).
+        $api = $this->apiWith(200, json_encode([
+            'session' => ['key' => 'SESSION_KEY', 'name' => "rj\ra"],
+        ]));
+        $this->assertNull($api->getSession('TOKEN'));
+
+        $api = $this->apiWith(200, json_encode([
+            'session' => ['key' => 'SESSION' . "\x00" . '_KEY', 'name' => 'rj'],
+        ]));
+        $this->assertNull($api->getSession('TOKEN'));
+    }
+
+    public function testGetSessionTrimsSurroundingWhitespace(): void
+    {
+        $api = $this->apiWith(200, json_encode([
+            'session' => ['key' => "  SESSION_KEY\t", 'name' => " rj\n"],
+        ]));
+        $session = $api->getSession('TOKEN');
+        $this->assertNotNull($session);
+        $this->assertSame('SESSION_KEY', $session['session_key']);
+        $this->assertSame('rj', $session['username']);
+    }
+
     public function testUpdateNowPlayingReturnsTrueOn200(): void
     {
         $api = $this->apiWith(200, json_encode([

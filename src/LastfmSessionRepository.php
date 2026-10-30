@@ -82,6 +82,10 @@ class LastfmSessionRepository
      * by unit tests. {@see self::delete()} is the plugin-side live write,
      * used by the scrobbler's invalid-session self-heal and disconnect.
      *
+     * Uses the row-alias upsert form (`... AS new`, MySQL 8.0.19+); the
+     * `VALUES()` spelling inside `ON DUPLICATE KEY UPDATE` is deprecated
+     * since 8.0.20 [review lastfm__srphp M-18].
+     *
      * @param string $userId     Phlix user UUID.
      * @param string $sessionKey Session key returned by `auth.getSession`.
      * @param string $username   Last.fm username (for display purposes).
@@ -90,10 +94,10 @@ class LastfmSessionRepository
     {
         $this->db->query(
             'INSERT INTO lastfm_sessions (user_id, session_key, username, connected_at)
-             VALUES (?, ?, ?, NOW())
-             ON DUPLICATE KEY UPDATE session_key = VALUES(session_key),
-                                     username    = VALUES(username),
-                                     connected_at = VALUES(connected_at)',
+             VALUES (?, ?, ?, NOW()) AS new
+             ON DUPLICATE KEY UPDATE session_key = new.session_key,
+                                     username    = new.username,
+                                     connected_at = new.connected_at',
             [$userId, $sessionKey, $username]
         );
     }

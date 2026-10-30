@@ -89,6 +89,31 @@ final class LastfmSessionRepositoryTest extends TestCase
         $this->repo->save('user-1', 'SK', 'rj');
     }
 
+    public function testSaveUsesRowAliasUpsertNotDeprecatedValuesFunction(): void
+    {
+        // VALUES() inside ON DUPLICATE KEY UPDATE is deprecated since MySQL
+        // 8.0.20; the row-alias form (8.0.19+) is the forward-compatible
+        // spelling of the same upsert [review lastfm__srphp M-18].
+        $captured = null;
+        $this->db->expects(self::once())
+            ->method('query')
+            ->willReturnCallback(function (string $sql, array $args) use (&$captured): array {
+                $captured = [$sql, $args];
+                return [];
+            });
+
+        $this->repo->save('user-1', 'SK', 'rj');
+
+        $this->assertIsArray($captured);
+        $this->assertStringContainsString('ON DUPLICATE KEY UPDATE', $captured[0]);
+        $this->assertStringContainsString('AS new', $captured[0]);
+        $this->assertStringNotContainsString('= VALUES(', $captured[0]);
+        $this->assertStringContainsString('session_key = new.session_key', $captured[0]);
+        $this->assertStringContainsString('username    = new.username', $captured[0]);
+        $this->assertStringContainsString('connected_at = new.connected_at', $captured[0]);
+        $this->assertSame(['user-1', 'SK', 'rj'], $captured[1]);
+    }
+
     public function testDeleteIssuesDelete(): void
     {
         $this->db->expects(self::once())
