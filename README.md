@@ -15,8 +15,11 @@ Connects a Phlix server to your Last.fm account:
 - **Scrobbling** — on playback stop the plugin submits a `track.scrobble`,
   enforcing Last.fm's official rule (track longer than 30 seconds **and** more
   than 50% played) before anything is recorded.
-- Authenticates via Last.fm **web auth**, signing every call with your shared
-  secret and storing one session key per Phlix user.
+- Connects each Phlix user to Last.fm through the **web auth** flow served by
+  the host: the host performs the authorize + callback handshake and persists
+  one session key per user into `lastfm_sessions`; the plugin signs
+  authenticated calls with your shared secret and consumes those stored
+  session keys when scrobbling.
 
 It subscribes to `phlix.playback.started` and `phlix.playback.stopped`.
 
@@ -40,7 +43,7 @@ Configure these in the Phlix admin **Plugins → Configure** dialog.
 
 | Setting | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `enabled` | bool | no | `false` | Master on/off for Last.fm scrobbling. Compared loosely, so truthy string values such as `'true'` persisted in the settings also enable it. |
+| `enabled` | bool | no | `false` | Master on/off for Last.fm scrobbling. Parsed strictly: a real bool, or a canonical boolean string (`'true'`, `'1'`, `'on'`, `'yes'` — case-insensitive) enables it; anything else, including junk strings like `'false'` and non-scalars, stays disabled. |
 | `api_key` | string | **yes** | — | Your Last.fm API key. Create a free API account at [last.fm/api/account/create](https://www.last.fm/api/account/create). |
 | `shared_secret` | string (secret) | **yes** | — | The "Shared secret" shown next to your API key on your [Last.fm API accounts](https://www.last.fm/api/accounts) page. Used to sign authenticated requests. |
 

@@ -100,6 +100,45 @@ final class LastfmConfigTest extends TestCase
         $this->assertTrue($config->enabled);
     }
 
+    public function testFromArrayWithFalsyStringEnabledIsDisabled(): void
+    {
+        // A persisted string 'false' must NOT enable the plugin. Loose
+        // `== true` comparison treated every non-empty string as truthy
+        // (M-LASTFM-09/17): strict filter_var parsing rejects it.
+        $config = LastfmConfig::fromArray([
+            'enabled'       => 'false',
+            'api_key'       => 'api-key',
+            'shared_secret' => 'secret',
+        ]);
+
+        $this->assertFalse($config->enabled);
+    }
+
+    public function testFromArrayWithNoAndOffEnabledStringsAreDisabled(): void
+    {
+        foreach (['no', 'off', '0', ''] as $falsy) {
+            $config = LastfmConfig::fromArray([
+                'enabled'       => $falsy,
+                'api_key'       => 'api-key',
+                'shared_secret' => 'secret',
+            ]);
+
+            $this->assertFalse($config->enabled, sprintf('string %s must not enable', var_export($falsy, true)));
+        }
+    }
+
+    public function testFromArrayWithNonScalarEnabledIsDisabled(): void
+    {
+        // An array/Object passed as 'enabled' is invalid input, not truthy.
+        $config = LastfmConfig::fromArray([
+            'enabled'       => ['yes'],
+            'api_key'       => 'api-key',
+            'shared_secret' => 'secret',
+        ]);
+
+        $this->assertFalse($config->enabled);
+    }
+
     public function testIsUsableReturnsTrueWhenFullyConfigured(): void
     {
         $config = new LastfmConfig('api-key', 'shared-secret', true);

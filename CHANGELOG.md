@@ -9,6 +9,13 @@ its tag lands (tagging is an owner action).
 
 ### Fixed
 
+- W-min50 minors batch: `enabled` is parsed strictly (junk strings such as
+  `'false'`, `'no'`, `'off'` and non-scalars no longer enable the plugin via
+  loose `== true` comparison — canonical booleans still do), the Overview
+  states the true auth split (host performs web-auth and persists session
+  keys; the plugin signs and consumes), and `LastfmApi::getSession` +
+  `LastfmSessionRepository::save` are annotated as host-mirrored reference
+  code with zero plugin-runtime callers.
 - W-min49 minors batch: truthful `api_sig` exclusion docs, honest deferred
   migration docblock, documented reserved `expires_at` column, exact
   callback-URL registration step, documented `api_key` non-mask judgment,

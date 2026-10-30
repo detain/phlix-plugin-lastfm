@@ -104,6 +104,12 @@ class LastfmApi
      * Mirrors Last.fm `auth.getSession`. The returned session key never
      * expires unless the user revokes it from their Last.fm settings.
      *
+     * Reference implementation only: the connect flow is served by the
+     * **host** (its OAuth callback performs this exchange and persists the
+     * key), so nothing in plugin runtime calls this method — it documents
+     * the wire protocol the host mirrors (pinned by unit tests). Deleting
+     * and reading session rows are the plugin-side live operations.
+     *
      * @param string $token Request token obtained by redirecting the user
      *                      through `https://www.last.fm/api/auth/?api_key=...&token=...`.
      *

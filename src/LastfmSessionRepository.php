@@ -76,6 +76,12 @@ class LastfmSessionRepository
      * Uses an `INSERT ... ON DUPLICATE KEY UPDATE` so reconnecting silently
      * replaces the previous key.
      *
+     * Reference implementation only: session rows are written by the
+     * **host** after its OAuth callback, never from plugin runtime (no src
+     * callers) — this method documents the upsert the host mirrors, pinned
+     * by unit tests. {@see self::delete()} is the plugin-side live write,
+     * used by the scrobbler's invalid-session self-heal and disconnect.
+     *
      * @param string $userId     Phlix user UUID.
      * @param string $sessionKey Session key returned by `auth.getSession`.
      * @param string $username   Last.fm username (for display purposes).
