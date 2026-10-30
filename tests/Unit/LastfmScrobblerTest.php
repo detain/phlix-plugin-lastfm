@@ -183,11 +183,18 @@ final class LastfmScrobblerTest extends TestCase
 
         $scrobbler->onPlaybackStarted(new PlaybackStarted('sess', 'u1', 'media-1', 'device', 0));
 
-        $this->assertCount(1, $warnings);
-        $this->assertSame('Last.fm now-playing update failed', $warnings[0]['message']);
-        $this->assertSame('u1', $warnings[0]['context']['user_id']);
-        $this->assertSame(9, $warnings[0]['context']['error_code']);
-        $this->assertStringContainsString('Invalid session key', (string) $warnings[0]['context']['error_message']);
+        // Under M-02 (later era than this test's birth), code 9 additionally
+        // triggers the invalid-session purge warning — the failure line itself
+        // must be present with its typed context.
+        $this->assertCount(2, $warnings);
+        $failure = array_values(array_filter(
+            $warnings,
+            static fn (array $w): bool => $w['message'] === 'Last.fm now-playing update failed',
+        ));
+        $this->assertCount(1, $failure);
+        $this->assertSame('u1', $failure[0]['context']['user_id']);
+        $this->assertSame(9, $failure[0]['context']['error_code']);
+        $this->assertStringContainsString('Invalid session key', (string) $failure[0]['context']['error_message']);
     }
 
     /**
@@ -304,6 +311,114 @@ final class LastfmScrobblerTest extends TestCase
 
         $this->assertCount(1, $warnings);
         $this->assertSame('playback.stopped', $warnings[0]['context']['hook']);
+    }
+
+    /**
+     * M-02 [review lastfm__secaudit M-1] — a stored session the API has
+     * permanently rejected (invalid-session envelope codes) must self-heal:
+     * the plugin deletes the row so credential replay stops and the host
+     * UI (row existence == connected) shows the account disconnected.
+     */
+    public function testInvalidSessionCodePurgesStoredSessionAndWarns(): void
+    {
+        $this->sessions->method('findByUserId')->willReturn([
+            'user_id' => 'u1', 'session_key' => 'DEAD', 'connected_at' => '2024-01-01 00:00:00',
+        ]);
+        $this->sessions->expects(self::once())->method('delete')->with('u1');
+        $this->api->method('updateNowPlaying')
+            ->willReturn(LastfmOutcome::failure(9, 'Invalid session key - Please re-authenticate'));
+
+        /** @var array<int, array{message: string, context: array<string, mixed>}> $warnings */
+        $warnings = [];
+        $scrobbler = $this->buildScrobbler(static fn (string $_id) => [
+            'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
+        ], $this->warningCollector($warnings));
+
+        $scrobbler->onPlaybackStarted(new PlaybackStarted('sess', 'u1', 'media-1', 'device', 0));
+
+        $messages = array_column($warnings, 'message');
+        $this->assertContains('Last.fm now-playing update failed', $messages);
+        $cleared = array_values(array_filter(
+            $warnings,
+            static fn (array $w): bool => str_contains($w['message'], 'session cleared'),
+        ));
+        $this->assertCount(1, $cleared);
+        $this->assertSame('u1', $cleared[0]['context']['user_id']);
+    }
+
+    /** Scrobble-path twin: code 88 (invalid session key) purges too. */
+    public function testScrobbleInvalidSessionCodeAlsoPurges(): void
+    {
+        $this->sessions->method('findByUserId')->willReturn([
+            'user_id' => 'u1', 'session_key' => 'DEAD', 'connected_at' => '2024-01-01 00:00:00',
+        ]);
+        $this->sessions->expects(self::once())->method('delete')->with('u1');
+        $this->api->method('scrobble')->willReturn(LastfmOutcome::failure(88, 'Invalid session key'));
+
+        $scrobbler = $this->buildScrobbler(static fn (string $_id) => [
+            'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
+        ]);
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', 101 * 10_000_000, true));
+    }
+
+    /**
+     * M-02 negative pin: a NON-session failure (16 = permission denied on
+     * this method) must never purge a live session — one failing feature
+     * is not a broken connection.
+     */
+    public function testNonSessionErrorCodeDoesNotPurge(): void
+    {
+        $this->sessions->method('findByUserId')->willReturn([
+            'user_id' => 'u1', 'session_key' => 'SK', 'connected_at' => '2024-01-01 00:00:00',
+        ]);
+        $this->sessions->expects(self::never())->method('delete');
+        $this->api->method('updateNowPlaying')
+            ->willReturn(LastfmOutcome::failure(16, 'Permission denied'));
+
+        $scrobbler = $this->buildScrobbler(static fn (string $_id) => [
+            'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
+        ]);
+        $scrobbler->onPlaybackStarted(new PlaybackStarted('sess', 'u1', 'media-1', 'device', 0));
+    }
+
+    /** M-02: cleanup failure is swallowed with its own warning, never thrown. */
+    public function testInvalidSessionPurgeFailureIsLoggedNotThrown(): void
+    {
+        $this->sessions->method('findByUserId')->willReturn([
+            'user_id' => 'u1', 'session_key' => 'DEAD', 'connected_at' => '2024-01-01 00:00:00',
+        ]);
+        $this->sessions->method('delete')->willThrowException(new \RuntimeException('DELETE failed'));
+        $this->api->method('updateNowPlaying')->willReturn(LastfmOutcome::failure(17, 'Login was required'));
+
+        /** @var array<int, array{message: string, context: array<string, mixed>}> $warnings */
+        $warnings = [];
+        $scrobbler = $this->buildScrobbler(static fn (string $_id) => [
+            'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
+        ], $this->warningCollector($warnings));
+
+        $scrobbler->onPlaybackStarted(new PlaybackStarted('sess', 'u1', 'media-1', 'device', 0));
+
+        $messages = array_column($warnings, 'message');
+        $this->assertContains('Last.fm invalid-session cleanup failed', $messages);
+    }
+
+    /**
+     * The typed facet itself: session-invalid codes are a closed set
+     * (4 = legacy docs invalid-session, 9, 88 current invalid session key,
+     * 17 = login required); other codes/unknown are never invalid-session.
+     */
+    public function testOutcomeInvalidSessionFacetClassification(): void
+    {
+        foreach ([4, 9, 17, 88] as $code) {
+            $this->assertTrue(
+                LastfmOutcome::failure($code, 'x')->isInvalidSession(),
+                "code {$code} must classify as invalid session",
+            );
+        }
+        $this->assertFalse(LastfmOutcome::failure(16, 'x')->isInvalidSession());
+        $this->assertFalse(LastfmOutcome::failure(8, 'x')->isInvalidSession());
+        $this->assertFalse(LastfmOutcome::failure()->isInvalidSession());
+        $this->assertFalse(LastfmOutcome::success()->isInvalidSession());
     }
 
     /**

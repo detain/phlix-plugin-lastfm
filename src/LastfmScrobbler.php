@@ -168,6 +168,7 @@ class LastfmScrobbler
             $this->logger->warning('Last.fm now-playing update failed', $outcome->logContext() + [
                 'user_id' => $event->userId,
             ]);
+            $this->purgeSessionIfInvalid($outcome, $event->userId);
         }
     }
 
@@ -252,6 +253,40 @@ class LastfmScrobbler
         if (!$outcome->success) {
             $this->logger->warning('Last.fm scrobble submission failed', $outcome->logContext() + [
                 'user_id' => $event->userId,
+            ]);
+            $this->purgeSessionIfInvalid($outcome, $event->userId);
+        }
+    }
+
+    /**
+     * Self-heal a permanently rejected session [review lastfm__secaudit M-1].
+     *
+     * When the API answers with an invalid-session envelope code, the
+     * stored `session_key` will fail on EVERY future event: the plugin
+     * keeps replaying a dead credential (log spam, rate-limit pressure)
+     * while the host UI still shows the account connected. Deleting the
+     * row stops the replay and flips the UI to disconnected (existence ==
+     * connected is the host's read law); the user re-authenticates through
+     * the normal OAuth flow. Cleanup failure is contained locally with its
+     * own warning — it must never replace the diagnostic that already
+     * fired, and never throws into the (M-06) boundary.
+     */
+    private function purgeSessionIfInvalid(LastfmOutcome $outcome, string $userId): void
+    {
+        if (!$outcome->isInvalidSession()) {
+            return;
+        }
+        try {
+            $this->sessions->delete($userId);
+            $this->logger->warning('Last.fm session cleared — the API rejected the stored session key; reconnect required', [
+                'user_id'    => $userId,
+                'error_code' => $outcome->errorCode,
+            ]);
+        } catch (\Throwable $t) {
+            $this->logger->warning('Last.fm invalid-session cleanup failed', [
+                'user_id'   => $userId,
+                'exception' => get_class($t),
+                'error'     => $t->getMessage(),
             ]);
         }
     }

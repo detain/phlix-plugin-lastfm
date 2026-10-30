@@ -90,7 +90,9 @@ class LastfmSessionRepository
     }
 
     /**
-     * Remove a user's Last.fm session — used when the user disconnects.
+     * Remove a user's Last.fm session — used when the user disconnects and
+     * by the scrobbler's invalid-session self-heal
+     * [review lastfm__secaudit M-1].
      *
      * @param string $userId Phlix user UUID.
      */

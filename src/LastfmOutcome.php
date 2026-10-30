@@ -30,6 +30,19 @@ namespace Phlix\Plugins\Scrobbler\Lastfm;
 final class LastfmOutcome
 {
     /**
+     * Last.fm envelope codes that mean the STORED SESSION is permanently
+     * rejected (re-authentication required): 4 = invalid session key per
+     * the legacy API docs, 9 = invalid session key / re-authenticate,
+     * 17 = login was required, 88 = invalid session key per the current
+     * docs. Everything else (permission, throttling, item availability)
+     * says nothing about session liveness. The typed classification
+     * replaces raw code branching in callers [review lastfm__secaudit M-1].
+     *
+     * @var list<int>
+     */
+    public const INVALID_SESSION_ERROR_CODES = [4, 9, 17, 88];
+
+    /**
      * @param bool        $success      True only when Last.fm accepted the call outright.
      * @param int|null    $errorCode    Envelope `error` code when the API answered with one.
      * @param string|null $errorMessage Envelope `message` when present.
@@ -91,6 +104,17 @@ final class LastfmOutcome
             $ignored,
             $ignoreReason,
         );
+    }
+
+    /**
+     * Whether this failure means the STORED SESSION is permanently invalid
+     * (the user must reconnect) — see {@see self::INVALID_SESSION_ERROR_CODES}.
+     * Successes and code-less transport failures are never session-invalid.
+     */
+    public function isInvalidSession(): bool
+    {
+        return $this->errorCode !== null
+            && in_array($this->errorCode, self::INVALID_SESSION_ERROR_CODES, true);
     }
 
     /**
