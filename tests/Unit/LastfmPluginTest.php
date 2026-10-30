@@ -22,6 +22,7 @@ use Phlix\Shared\Events\Playback\PlaybackStopped;
 use PHPUnit\Framework\TestCase;
 use Psr\Container\ContainerInterface;
 use Psr\Container\NotFoundExceptionInterface;
+use Psr\Log\LoggerInterface;
 
 /**
  * Additional unit tests for {@see LastfmPlugin}.
@@ -242,31 +243,150 @@ final class LastfmPluginTest extends TestCase
 
     public function testBuildCooperativeRunnerTimeoutPath(): void
     {
-        // Test that when cooperative wait times out, it returns whatever state it's in
+        // When the rendezvous never settles within the ceiling, the runner
+        // must fail fast to the transient zero-status transport shape —
+        // without ever spinning (M-07: the 1ms usleep wall is gone).
         /** @var \Workerman\Http\Client&\PHPUnit\Framework\MockObject\MockObject $client */
         $client = $this->createMock(\Workerman\Http\Client::class);
 
-        // Never call success/error, so the wait loop will timeout
+        // Never call success/error, so the await must time out.
         $client->expects(self::once())
             ->method('request')
             ->willReturnCallback(function (string $url, array $options): void {
-                // Don't call success or error callbacks - simulate timeout
+                // Drop the callbacks entirely - simulate no response arriving.
             });
 
-        $runner = LastfmPlugin::buildCooperativeRunner($client);
+        $receivedTimeout = null;
+        $factory = static function (float $timeout) use (&$receivedTimeout): array {
+            $receivedTimeout = $timeout;
 
-        // Use reflection to get the constant
-        $reflection = new \ReflectionClass(LastfmPlugin::class);
-        $const = $reflection->getConstant('HTTP_MAX_WAIT_SECONDS');
+            return [
+                static function (): void {},
+                static fn (): bool => false, // await reports: never settled
+            ];
+        };
+
+        $runner = LastfmPlugin::buildCooperativeRunner($client, 2.0, $factory);
 
         $start = microtime(true);
         $result = $runner('https://example.com', 'body', []);
         $elapsed = microtime(true) - $start;
 
-        // Should timeout and return whatever state was reached (done=false, status=0)
-        $this->assertSame(0, $result['status']);
-        // The wait should have been close to HTTP_MAX_WAIT_SECONDS
-        $this->assertGreaterThanOrEqual($const - 0.5, $elapsed);
+        // The ceiling is handed to the rendezvous factory, not consumed here.
+        self::assertSame(2.0, $receivedTimeout);
+        // Unsettled await => zero-status transport failure, immediately.
+        self::assertSame(['status' => 0, 'body' => '', 'headers' => []], $result);
+        self::assertLessThan(0.5, $elapsed, 'timed-out rendezvous must never spin toward the wall');
+    }
+
+    public function testCooperativeContextAvailableIsFalseWithoutSwoole(): void
+    {
+        // Deterministic in this venue: no swoole extension => no context.
+        self::assertFalse(LastfmPlugin::cooperativeContextAvailable());
+    }
+
+    public function testCooperativeRunnerSignalsRendezvousOnlyOnce(): void
+    {
+        // success firing, then error firing, must push exactly one slot.
+        /** @var \Workerman\Http\Client&\PHPUnit\Framework\MockObject\MockObject $client */
+        $client = $this->createMock(\Workerman\Http\Client::class);
+        $client->method('request')->willReturnCallback(function (string $url, array $options): void {
+            /** @var callable $success */
+            $success = $options['success'];
+            /** @var callable $error */
+            $error = $options['error'];
+            $success(new \Workerman\Http\Response(200, [], 'ok'));
+            $error(new \RuntimeException('late'));
+        });
+
+        $signalCount = 0;
+        $factory = static function (float $timeout) use (&$signalCount): array {
+            return [
+                static function () use (&$signalCount): void {
+                    $signalCount++;
+                },
+                static fn (): bool => true,
+            ];
+        };
+
+        $runner = LastfmPlugin::buildCooperativeRunner($client, 1.0, $factory);
+        $result = $runner('https://example.com', 'body', []);
+
+        self::assertSame(1, $signalCount);
+        self::assertSame(200, $result['status']);
+        self::assertSame('ok', $result['body']);
+    }
+
+    public function testCooperativeRunnerCapturesResponseHeaders(): void
+    {
+        // C6 seam: Retry-After on a 429 must reach the dispatch() result.
+        /** @var \Workerman\Http\Client&\PHPUnit\Framework\MockObject\MockObject $client */
+        $client = $this->createMock(\Workerman\Http\Client::class);
+        $client->method('request')->willReturnCallback(function (string $url, array $options): void {
+            /** @var callable $success */
+            $success = $options['success'];
+            $success(new \Workerman\Http\Response(429, ['Retry-After' => ['7']], 'slow down'));
+        });
+
+        $factory = static fn (float $timeout): array => [
+            static function (): void {},
+            static fn (): bool => true,
+        ];
+
+        $runner = LastfmPlugin::buildCooperativeRunner($client, 1.0, $factory);
+        $result = $runner('https://example.com', 'body', []);
+
+        self::assertSame(429, $result['status']);
+        self::assertArrayHasKey('Retry-After', $result['headers']);
+    }
+
+    public function testDefaultRendezvousOutsideCoroutineFailsFastWithoutSpin(): void
+    {
+        // Venue law (no swoole here): the default holder reports unsettled
+        // until the signal fires - it never blocks and never fakes success.
+        /** @var \Workerman\Http\Client&\PHPUnit\Framework\MockObject\MockObject $client */
+        $client = $this->createMock(\Workerman\Http\Client::class);
+        $client->method('request')->willReturnCallback(function (string $url, array $options): void {
+            // fire-and-forget: callbacks never invoked (unreachable async)
+        });
+
+        $runner = LastfmPlugin::buildCooperativeRunner($client);
+
+        $start = microtime(true);
+        $result = $runner('https://example.com', 'body', []);
+        $elapsed = microtime(true) - $start;
+
+        self::assertSame(['status' => 0, 'body' => '', 'headers' => []], $result);
+        self::assertLessThan(0.5, $elapsed);
+    }
+
+    public function testContextGatedRunnerUsesAsyncPathInsideCoroutine(): void
+    {
+        $async = static fn (string $u, string $b, array $h): array => ['status' => 1, 'body' => 'async', 'headers' => []];
+        $blocking = static fn (string $u, string $b, array $h): array => ['status' => 1, 'body' => 'blocking', 'headers' => []];
+
+        /** @var LoggerInterface&\PHPUnit\Framework\MockObject\MockObject $logger */
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::never())->method('warning');
+
+        $runner = LastfmPlugin::contextGatedRunner($async, $blocking, static fn (): bool => true, $logger);
+
+        self::assertSame('async', $runner('u', 'b', [])['body']);
+    }
+
+    public function testContextGatedRunnerFallsBackBlockingWithSingleNotice(): void
+    {
+        $async = static fn (string $u, string $b, array $h): array => ['status' => 1, 'body' => 'async', 'headers' => []];
+        $blocking = static fn (string $u, string $b, array $h): array => ['status' => 1, 'body' => 'blocking', 'headers' => []];
+
+        /** @var LoggerInterface&\PHPUnit\Framework\MockObject\MockObject $logger */
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())->method('warning');
+
+        $runner = LastfmPlugin::contextGatedRunner($async, $blocking, static fn (): bool => false, $logger);
+
+        self::assertSame('blocking', $runner('u', 'b', [])['body']);
+        self::assertSame('blocking', $runner('u', 'b', [])['body']);
     }
 }
 

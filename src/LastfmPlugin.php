@@ -288,7 +288,7 @@ final class LastfmPlugin implements LifecycleInterface, ConfigurableInterface
      * runner that wraps the stream-based default — callers will still
      * receive correct results but the worker will block on I/O.
      *
-     * @return callable(string $url, string $body, array<string, string> $headers): array{status: int, body: string}
+     * @return callable(string $url, string $body, array<string, string> $headers): array{status: int, body: string, headers: array<array-key, mixed>}
      */
     private function createAsyncHttpRunner(): callable
     {
@@ -305,62 +305,191 @@ final class LastfmPlugin implements LifecycleInterface, ConfigurableInterface
             'connect_timeout' => 3,
         ]);
 
-        return self::buildCooperativeRunner($client);
+        // The cooperative rendezvous only parks safely inside a coroutine
+        // (see SV-0.4 law on phlix-server src/Hub/HttpClient.php). Outside a
+        // coroutine the blocking stream runner is the only honest choice —
+        // the gate routes accordingly and warns once.
+        return self::contextGatedRunner(
+            self::buildCooperativeRunner($client),
+            \Phlix\Plugins\Scrobbler\Lastfm\LastfmApi::defaultHttp(),
+            static fn (): bool => self::cooperativeContextAvailable(),
+            $this->logger,
+        );
+    }
+
+    /**
+     * Whether a Swoole coroutine context is active for the CURRENT call.
+     *
+     * Resolved dynamically (no static Swoole references): this plugin must
+     * load — and analyze — on deployments without the swoole extension.
+     */
+    public static function cooperativeContextAvailable(): bool
+    {
+        if (!class_exists('Swoole\\Coroutine')) {
+            return false;
+        }
+
+        // Reflection form (not a literal static call): swoole is optional at
+        // runtime and absent from static-analysis venues without its stubs.
+        return (new \ReflectionMethod('Swoole\\Coroutine', 'inCoroutine'))->invoke(null) === true;
+    }
+
+    /**
+     * Pick the async (in-coroutine) runner or the blocking stream fallback,
+     * warning exactly once when dispatch ever lands outside a coroutine.
+     *
+     * Extracted as a public static seam so the gating and the one-shot
+     * notice are unit-testable without any event loop at all.
+     *
+     * @param callable(string, string, array<string, string>): array{status: int, body: string, headers: array<array-key, mixed>} $async
+     * @param callable(string, string, array<string, string>): array{status: int, body: string, headers: array<array-key, mixed>} $blocking
+     * @param callable(): bool $contextProbe
+     */
+    public static function contextGatedRunner(
+        callable $async,
+        callable $blocking,
+        callable $contextProbe,
+        LoggerInterface $logger,
+    ): callable {
+        $notified = false;
+
+        return static function (string $url, string $body, array $headers) use ($async, $blocking, $contextProbe, $logger, &$notified): array {
+            if ($contextProbe()) {
+                return $async($url, $body, $headers);
+            }
+
+            if (!$notified) {
+                $notified = true;
+                $logger->warning('Last.fm: async HTTP dispatched outside a coroutine context — using blocking stream fallback');
+            }
+
+            return $blocking($url, $body, $headers);
+        };
     }
 
     /**
      * Wrap a {@see \Workerman\Http\Client} in the canonical Phlix
      * cooperative-wait runner (see phlix-server `CLAUDE.md` "Async
-     * Patterns").
+     * Patterns" and the SV-0.4 law on `src/Hub/HttpClient.php`).
      *
      * The request is fired with `success`/`error` callbacks (async, does
-     * NOT block the event loop), then we cooperatively wait — `usleep(1000)`
-     * yields to the loop so other connections keep progressing while this
-     * scrobble's response arrives. This is the same shape used by
-     * `MetadataHttpClient`, `Hub\HttpClient`, and `S3Client`.
+     * NOT block the event loop), then the caller parks on a one-slot
+     * rendezvous — under Swoole hooks the pop yields to the scheduler so
+     * other connections keep progressing while this scrobble's response
+     * arrives. This replaces the previous 1 ms `usleep` polling wall: an
+     * unhooked spin (or a Channel touch outside a coroutine) starves the
+     * ENTIRE worker, so production dispatch reaches this runner only
+     * through {@see self::contextGatedRunner()}.
+     *
+     * The rendezvous is injectable so the mechanics are unit-testable
+     * without the swoole extension (absent from CI). The default factory
+     * builds a `Swoole\Coroutine\Channel(1)` when a coroutine context is
+     * live and, outside one, a non-spinning synchronous holder that fails
+     * fast: an unsettled await never fabricates success — it yields the
+     * same zero-status transport shape a wait timeout does.
      *
      * Extracted (and non-private) so it can be unit-tested against a
      * client double without an event loop or a live network.
      *
-     * @return callable(string $url, string $body, array<string, string> $headers): array{status: int, body: string}
+     * @param callable(float): array{0: callable(): void, 1: callable(): bool}|null $rendezvousFactory
+     *
+     * @return callable(string $url, string $body, array<string, string> $headers): array{status: int, body: string, headers: array<array-key, mixed>}
      */
-    public static function buildCooperativeRunner(\Workerman\Http\Client $client): callable
-    {
-        return static function (string $url, string $body, array $headers) use ($client): array {
-            $state = ['done' => false, 'status' => 0, 'body' => ''];
+    public static function buildCooperativeRunner(
+        \Workerman\Http\Client $client,
+        float $maxWaitSeconds = self::HTTP_MAX_WAIT_SECONDS,
+        ?callable $rendezvousFactory = null,
+    ): callable {
+        $rendezvousFactory ??= static fn (float $timeout): array => self::defaultRendezvous($timeout);
+
+        return static function (string $url, string $body, array $headers) use ($client, $maxWaitSeconds, $rendezvousFactory): array {
+            /** @var array{status: int, body: string, headers: array<array-key, mixed>} $captured */
+            $captured = ['status' => 0, 'body' => '', 'headers' => []];
+            [$signal, $await] = $rendezvousFactory($maxWaitSeconds);
+
+            // success and error must never both feed a capacity-1 rendezvous.
+            $signaled = false;
+            $notify = static function () use (&$signaled, $signal): void {
+                if ($signaled) {
+                    return;
+                }
+                $signaled = true;
+                $signal();
+            };
 
             try {
                 $client->request($url, [
                     'method'  => 'POST',
                     'data'    => $body,
                     'headers' => $headers,
-                    'success' => static function ($response) use (&$state): void {
+                    'success' => static function ($response) use (&$captured, $notify): void {
                         if ($response instanceof \Workerman\Http\Response) {
-                            $state['status'] = $response->getStatusCode();
-                            $state['body']   = (string) $response->getBody();
+                            $captured['status']  = $response->getStatusCode();
+                            $captured['body']    = (string) $response->getBody();
+                            $captured['headers'] = $response->getHeaders();
                         }
-                        $state['done'] = true;
+                        $notify();
                     },
-                    'error'   => static function ($_unused) use (&$state): void {
+                    'error'   => static function () use ($notify): void {
                         // Transport/DNS error — leave status 0 so the caller
                         // treats it the same as a network-level failure.
-                        $state['done'] = true;
+                        $notify();
                     },
                 ]);
             } catch (\Throwable) {
                 // Synchronous throw (bad address, etc.) — zero-status failure.
-                return ['status' => 0, 'body' => ''];
+                return ['status' => 0, 'body' => '', 'headers' => []];
             }
 
-            // Cooperative wait — yields to the event loop (usleep is hooked
-            // under the Swoole runtime) so the worker is NOT blocked.
-            $waited = 0.0;
-            while (!$state['done'] && $waited < self::HTTP_MAX_WAIT_SECONDS) {
-                usleep(1000); // 1ms
-                $waited += 0.001;
+            if ($await() !== true) {
+                // Waited out the ceiling with no response — indistinguishable
+                // from a transport failure (C6 law: zero status = transient).
+                return ['status' => 0, 'body' => '', 'headers' => []];
             }
 
-            return ['status' => (int) $state['status'], 'body' => (string) $state['body']];
+            return $captured;
         };
+    }
+
+    /**
+     * Default rendezvous pair: Channel(1) inside a live coroutine, a
+     * fail-fast synchronous holder outside one. Swoole classes resolve
+     * dynamically so this file analyzes without swoole stubs.
+     *
+     * @return array{0: callable(): void, 1: callable(): bool}
+     */
+    private static function defaultRendezvous(float $timeout): array
+    {
+        if (self::cooperativeContextAvailable()) {
+            $channelClass = 'Swoole\\Coroutine\\Channel';
+            $channel = new $channelClass(1);
+
+            // Reflection closures (phpstan models getClosure() on a bound
+            // instance as non-null): the Channel class is invisible to static
+            // analysis here (swoole optional), and its methods are guaranteed
+            // present whenever the coroutine context probe passed above.
+            $pusher = (new \ReflectionMethod($channel, 'push'))->getClosure($channel);
+            $popper = (new \ReflectionMethod($channel, 'pop'))->getClosure($channel);
+
+            return [
+                static function () use ($pusher): void {
+                    $pusher(true);
+                },
+                static function () use ($popper, $timeout): bool {
+                    return $popper($timeout) === true;
+                },
+            ];
+        }
+
+        $settled = false;
+
+        return [
+            static function () use (&$settled): void {
+                $settled = true;
+            },
+            static function () use (&$settled): bool {
+                return $settled;
+            },
+        ];
     }
 }
