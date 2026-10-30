@@ -9,6 +9,16 @@ parameters:
         - tests
     reportUnmatchedIgnoredErrors: false
     ignoreErrors:
+        # Narrowed from a file-wide class.notFound blanket (M-LASTFM-16): these
+        # two messages are the complete measured inventory of that identifier
+        # in this file — the host-provided ItemRepository is unresolvable in
+        # isolated plugin analysis. Any NEW unknown-class error here fails the
+        # gate instead of being silently swallowed.
         -
             identifier: class.notFound
+            message: '#^Class Phlix\\Media\\Library\\ItemRepository not found\.$#'
+            path: src/LastfmPlugin.php
+        -
+            identifier: class.notFound
+            message: '#^Call to method findById\(\) on an unknown class Phlix\\Media\\Library\\ItemRepository\.$#'
             path: src/LastfmPlugin.php

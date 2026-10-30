@@ -25,14 +25,14 @@ use ReflectionMethod;
  */
 final class LastfmPluginConfigureTest extends TestCase
 {
-    public function test_implements_lifecycle_and_configurable(): void
+    public function testImplementsLifecycleAndConfigurable(): void
     {
         $plugin = new LastfmPlugin();
         $this->assertInstanceOf(LifecycleInterface::class, $plugin);
         $this->assertInstanceOf(ConfigurableInterface::class, $plugin);
     }
 
-    public function test_constructor_is_autowirable_with_no_arguments(): void
+    public function testConstructorIsAutowirableWithNoArguments(): void
     {
         // The host container calls this with zero args; it must not throw.
         $plugin = new LastfmPlugin();
@@ -42,7 +42,7 @@ final class LastfmPluginConfigureTest extends TestCase
         $this->assertFalse($this->config($plugin)->isUsable());
     }
 
-    public function test_configure_builds_config_from_settings(): void
+    public function testConfigureBuildsConfigFromSettings(): void
     {
         $plugin = new LastfmPlugin();
         $plugin->configure([

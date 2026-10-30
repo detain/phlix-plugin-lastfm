@@ -80,7 +80,7 @@ vendor/bin/phpstan analyse
 php scripts/security-audit-check.php
 ```
 
-Static analysis is configured in `phpstan.neon` (level 6 over `src`).
+Static analysis is configured in `phpstan.neon` (level 9 over `src`).
 
 `scripts/security-audit-check.php` audits the whole of `composer.lock` — runtime
 **and** `require-dev` dependencies — via `composer audit --locked`, and runs in CI

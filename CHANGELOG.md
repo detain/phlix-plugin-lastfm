@@ -9,6 +9,11 @@ its tag lands (tagging is an owner action).
 
 ### Fixed
 
+- W-min51 minors batch: README now states the real phpstan level (9, matching
+  the CI gate) and the `phpstan.neon` `class.notFound` ignore is narrowed from
+  a file-wide blanket to the two measured ItemRepository messages — any new
+  unknown-class error in `LastfmPlugin.php` now fails the gate; the three
+  snake_case test names in `LastfmPluginConfigureTest` are camelCase.
 - W-min50 minors batch: `enabled` is parsed strictly (junk strings such as
   `'false'`, `'no'`, `'off'` and non-scalars no longer enable the plugin via
   loose `== true` comparison — canonical booleans still do), the Overview
