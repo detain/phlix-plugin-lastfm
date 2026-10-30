@@ -179,6 +179,72 @@ final class LastfmApiHttpTest extends TestCase
     }
 
     /**
+     * M-23 [review lastfm minors W-min49]: an "ok-shaped" 200 whose body is
+     * not the documented `nowplaying` payload still counts as success
+     * (permissive verdict survives shape variance) but must leave a debug
+     * breadcrumb instead of passing in total silence.
+     */
+    public function testNowPlayingWithoutDocumentedEchoLogsDebugButStaysSuccess(): void
+    {
+        $debugs = [];
+
+        $logger = new class ($debugs) extends NullLogger {
+            /** @var array<int, array{message: string, context: array<string, mixed>}> */
+            private array $debugsRef;
+
+            public function __construct(array &$debugsRef)
+            {
+                $this->debugsRef = &$debugsRef;
+            }
+
+            public function debug($message, array $context = []): void
+            {
+                $this->debugsRef[] = ['message' => $message, 'context' => $context];
+            }
+        };
+
+        $http = static function (): array {
+            return ['status' => 200, 'body' => '{"looped":0,"ignored":0}'];
+        };
+
+        $api = new LastfmApi('API_KEY', 'SHARED_SECRET', $logger, $http, 0.0);
+        $outcome = $api->updateNowPlaying('SESSION_KEY', 'Track', 'Artist');
+
+        $this->assertTrue($outcome->success, 'absent echo must stay permissive (at most a debug line)');
+        $this->assertCount(1, $debugs, 'an ok-shaped reply without the `nowplaying` echo logs one debug line');
+        $this->assertStringContainsString('nowplaying', $debugs[0]['message']);
+    }
+
+    /** The documented echo path stays silent — no debug noise for healthy replies. */
+    public function testNowPlayingWithDocumentedEchoLogsNoDebug(): void
+    {
+        $debugs = [];
+
+        $logger = new class ($debugs) extends NullLogger {
+            /** @var array<int, string> */
+            private array $debugsRef;
+
+            public function __construct(array &$debugsRef)
+            {
+                $this->debugsRef = &$debugsRef;
+            }
+
+            public function debug($message, array $context = []): void
+            {
+                $this->debugsRef[] = (string) $message;
+            }
+        };
+
+        $http = static function (): array {
+            return ['status' => 200, 'body' => '{"nowplaying":{"track":{"#text":"Track"}}}'];
+        };
+
+        $api = new LastfmApi('API_KEY', 'SHARED_SECRET', $logger, $http, 0.0);
+        $this->assertTrue($api->updateNowPlaying('SESSION_KEY', 'Track', 'Artist')->success);
+        $this->assertSame([], $debugs);
+    }
+
+    /**
      * A transport/non-2xx failure (decoded body unavailable) surfaces as a
      * typed failure with no error code — still never a success.
      */

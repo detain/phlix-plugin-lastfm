@@ -19,7 +19,10 @@ use Workerman\MySQL\Connection;
  * Each row in `lastfm_sessions` ties one Phlix `user_id` to one Last.fm
  * `session_key` and the timestamp the user authorised access. Session
  * keys do not expire on the Last.fm side unless the user revokes them
- * from their account settings.
+ * from their account settings — which is exactly why the table's
+ * `expires_at` column is reserved-but-unused (see
+ * {@see \Phlix\Plugins\Scrobbler\Lastfm\Database\Migrations\CreateLastfmSessionsTable});
+ * the plugin only ever reads `user_id`, `session_key`, and `connected_at`.
  *
  * @package Phlix\Plugins\Scrobbler\Lastfm
  * @since 0.15.0

@@ -19,6 +19,15 @@ use Workerman\MySQL\Connection;
  * This table stores per-user Last.fm session keys. Each row ties one Phlix
  * `user_id` to one Last.fm `session_key` and related metadata.
  *
+ * `expires_at` is a RESERVED column, deliberately neither read nor written:
+ * Last.fm session keys never expire on the API side — the only loss of
+ * validity is user revocation, which this plugin handles by DELETING the row
+ * (invalid-session self-heal) and the host by replacing it on reconnect.
+ * The column exists for cross-repo schema parity with the host's
+ * `lastfm_sessions` shape (phlix-server migrations 023/089 create the same
+ * column) and its NULL == "does not expire" semantics; dropping it here
+ * would fork the mirrored schema for zero benefit [review lastfm minors W-min49].
+ *
  * @internal  Called by {@see \Phlix\Plugins\Scrobbler\Lastfm\Database\LastfmMigrationRunner}.
  * @since 0.15.0
  */

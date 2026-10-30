@@ -15,8 +15,12 @@ namespace Phlix\Plugins\Scrobbler\Lastfm\Database;
  * Runs database migrations for the Last.fm plugin.
  *
  * Uses `CREATE TABLE IF NOT EXISTS` so calling {@see run()} repeatedly
- * is safe (idempotent). The runner is invoked by {@see LastfmPlugin::onEnable()}
- * before the session repository is resolved from the container.
+ * is safe (idempotent). The runner is invoked LAZILY — never at boot:
+ * {@see \Phlix\Plugins\Scrobbler\Lastfm\LastfmPlugin::onEnable()} does zero
+ * I/O, and the migration fires on the FIRST playback event this worker
+ * processes, through the deferred schema-ensure closure built by
+ * `LastfmPlugin::makeSchemaEnsurer()`. `LastfmBootSafetyTest` pins that
+ * `onEnable()` must not run migrations or touch the database.
  *
  * @package Phlix\Plugins\Scrobbler\Lastfm\Database
  * @since 0.15.0

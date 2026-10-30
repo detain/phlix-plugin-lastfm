@@ -26,10 +26,10 @@ use Psr\Log\NullLogger;
  *
  * Last.fm signs every authenticated call. The signature input is the
  * alphabetically-sorted concatenation of all request parameters
- * (excluding `format` and `callback`), with their values appended, and
- * the shared secret tacked on at the end. The MD5 of that UTF-8 byte
- * string becomes the `api_sig` parameter. See the worked example in
- * {@see self::buildApiSig()}'s tests.
+ * (excluding `format`, `callback`, and any pre-existing `api_sig`), with
+ * their values appended, and the shared secret tacked on at the end. The
+ * MD5 of that UTF-8 byte string becomes the `api_sig` parameter. See the
+ * worked example in {@see self::buildApiSig()}'s tests.
  *
  * The class is intentionally framework-agnostic — it uses a pluggable
  * HTTP runner callable so test doubles can swap in a custom implementation
@@ -174,6 +174,16 @@ class LastfmApi
         $response = $this->dispatch($params);
         $decoded = $response['decoded'];
         if ($decoded !== null && !isset($decoded['error'])) {
+            // M-23 [review lastfm minors W-min49]: an "ok-shaped" body that is
+            // not the documented `nowplaying` payload still counts as success
+            // (the permissive verdict survives upstream shape variance by
+            // design) but leaves a debug breadcrumb rather than passing in
+            // total silence — the milder twin of the scrobble @attr story.
+            if (!isset($decoded['nowplaying'])) {
+                $this->logger->debug('Last.fm now-playing reply carried no `nowplaying` echo', [
+                    'method' => 'track.updateNowPlaying',
+                ]);
+            }
             return LastfmOutcome::success();
         }
         return self::failureOutcome($response);
@@ -233,7 +243,9 @@ class LastfmApi
      * Build the `api_sig` parameter per the Last.fm authentication spec.
      *
      * Algorithm:
-     *  1. Drop `format` and `callback` from the parameter set.
+     *  1. Drop `format`, `callback`, and `api_sig` itself from the parameter
+     *     set (a set that already carries a signature must never fold the
+     *     old signature into the new one — re-signing has to be idempotent).
      *  2. Sort the remaining keys alphabetically.
      *  3. Concatenate `key . value` for each kept parameter, in order.
      *  4. Append the shared secret.

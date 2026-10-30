@@ -53,9 +53,20 @@ Configure these in the Phlix admin **Plugins → Configure** dialog.
 ### Where to get your credentials
 
 1. Sign in to Last.fm and open [**Create an API account**](https://www.last.fm/api/account/create).
-2. Fill in the application name/description; the **Callback URL** should point back at your Phlix server.
+2. Fill in the application name/description. For the **Callback URL**, register
+   the exact path the host derives at auth time —
+   `https://<your-phlix-host>/api/v1/oauth/lastfm/callback` (the host sends
+   that URL as `cb=` on every auth request, and Last.fm validates the request
+   against this registered URL, so a different or query-strewn value fails
+   the handshake).
 3. Copy the **API key** into `api_key` and the **Shared secret** into `shared_secret`.
 4. Enable the plugin and toggle `enabled` on.
+
+`api_key` is deliberately **not** marked `secret` while `shared_secret` is:
+a Last.fm API key is a public client identifier — the web-auth flow embeds it
+in the browser-facing authorization URL by design — whereas the shared secret
+is signing material that never leaves the server and is masked in the admin UI
+[review lastfm minors W-min49].
 
 ## Development
 
