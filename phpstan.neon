@@ -9,7 +9,7 @@ parameters:
         - tests
     reportUnmatchedIgnoredErrors: false
     ignoreErrors:
-        # Narrowed from a file-wide class.notFound blanket (M-LASTFM-16): these
+        # Narrowed from a file-wide class.notFound blanket: these
         # two messages are the complete measured inventory of that identifier
         # in this file — the host-provided ItemRepository is unresolvable in
         # isolated plugin analysis. Any NEW unknown-class error here fails the

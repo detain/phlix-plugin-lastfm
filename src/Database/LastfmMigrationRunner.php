@@ -36,10 +36,12 @@ final class LastfmMigrationRunner
     }
 
     /**
-     * Execute all pending migrations.
+     * Ensure the plugin schema is present.
      *
-     * Currently runs a single migration; the design supports adding subsequent
-     * numbered migrations that will be run in order.
+     * Applies the one migration this plugin ships —
+     * {@see \Phlix\Plugins\Scrobbler\Lastfm\Database\Migrations\CreateLastfmSessionsTable()}
+     * — directly. There is no registry, ordering, or versioning layer:
+     * a future second migration means extending this method deliberately.
      */
     public function run(): void
     {

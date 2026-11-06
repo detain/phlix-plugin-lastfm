@@ -44,7 +44,7 @@ final class LastfmScrobblerEdgeCasesTest extends TestCase
 
     /**
      * Test that onPlaybackStarted skips when session exists but track is not found.
-     * This covers line 132-133 in LastfmScrobbler where track is null.
+     * Exercises the null-track guard in LastfmScrobbler::handlePlaybackStarted().
      */
     public function testOnPlaybackStartedSkipsWhenTrackNotFound(): void
     {
@@ -63,7 +63,7 @@ final class LastfmScrobblerEdgeCasesTest extends TestCase
 
     /**
      * Test that onPlaybackStopped skips when session exists but track is not found.
-     * This covers line 159-160 in LastfmScrobbler where track is null.
+     * Exercises the null-track guard in LastfmScrobbler::handlePlaybackStopped().
      */
     public function testOnPlaybackStoppedSkipsWhenTrackNotFound(): void
     {
@@ -82,7 +82,7 @@ final class LastfmScrobblerEdgeCasesTest extends TestCase
 
     /**
      * Test that onPlaybackStarted skips when session exists but track has no artist.
-     * This covers line 262-263 in resolveTrackResolver - when title or artist is null.
+     * Exercises the null title/artist guard in LastfmScrobbler::handlePlaybackStarted().
      */
     public function testOnPlaybackStartedSkipsWhenTrackHasNoArtist(): void
     {

@@ -46,31 +46,30 @@ class LastfmScrobbler
     private const TICKS_PER_SECOND = 10_000_000;
 
     /**
-     * M-05 [review lastfm__srphp M03]: bound of the in-process transient
-     * scrobble retry queue. Overflow drops the OLDEST pending submission
-     * (with a warning) — a bounded memory ceiling beats unbounded growth
-     * during a long Last.fm outage.
+     * Bound of the in-process transient scrobble retry queue. Overflow
+     * drops the OLDEST pending submission (with a warning) — a bounded
+     * memory ceiling beats unbounded growth during a long Last.fm outage.
      */
     public const MAX_RETRY_QUEUE_SIZE = 50;
 
     /**
-     * M-05: total attempts per scrobble (the live one that queued it plus
+     * Total attempts per scrobble (the live one that queued it plus
      * replays). Scrobble timestamps are explicit and Last.fm dedups, so
      * late replay is safe; after the cap the job is dropped with a warning.
      */
     public const MAX_SCROBBLE_ATTEMPTS = 3;
 
-    /** M-05: replay budget per stop event — keeps one event from blocking the worker on a full queue. */
+    /** Replay budget per stop event — keeps one event from blocking the worker. */
     private const MAX_DRAIN_PER_EVENT = 5;
 
-    /** M-05: backoff applied to a re-queued job when the server sent no Retry-After. */
+    /** Backoff applied to a re-queued job when the server sent no Retry-After. */
     private const DEFAULT_RETRY_BACKOFF_SECONDS = 60.0;
 
     /**
      * Pending scrobbles whose live attempt hit a TRANSIENT failure.
      * Process-local by design: a restart loses the queue (each eventual
      * drop is at least loud in logs; durable offline queues are a
-     * host-level concern, out of plugin scope) [review lastfm__srphp M03].
+     * host-level concern, out of plugin scope).
      *
      * @var list<array{user_id:string,session_key:string,track:string,artist:string,album:?string,timestamp:int,attempts:int,not_before:float}>
      */
@@ -152,7 +151,7 @@ class LastfmScrobbler
      * Handle `phlix.playback.started` — sends Now Playing if the user has
      * a Last.fm session.
      *
-     * M-06 [review lastfm__srphp M06]: the entire body runs inside a
+     * The entire body runs inside a
      * `Throwable` boundary. The host event dispatcher (ListenerRegistry)
      * invokes each listener WITHOUT isolation, so an escaped throw here —
      * a dropped MySQL connection under workerman's persistent connections,
@@ -191,7 +190,7 @@ class LastfmScrobbler
             $artist,
             is_string($track['album'] ?? null) ? $track['album'] : null,
         );
-        // M-04 [review lastfm__srphp M04]: the bool verdict used to be
+        // The bool verdict used to be
         // discarded — a rejected now-playing update vanished without a
         // trace. Every failure now leaves a log line (typed outcome
         // context is response-side only: no credentials).
@@ -200,7 +199,7 @@ class LastfmScrobbler
                 'user_id' => $event->userId,
             ]);
             $this->purgeSessionIfInvalid($outcome, $event->userId);
-            // M-05 note: transient now-playing failures are deliberately NOT
+            // Note: transient now-playing failures are deliberately NOT
             // retried — "now playing" is ephemeral state that the next
             // event supersedes; replaying stale status would be a lie.
         }
@@ -213,8 +212,8 @@ class LastfmScrobbler
      * The rule is enforced here (the underlying {@see LastfmApi::scrobble()}
      * does no gating of its own).
      *
-     * M-06 [review lastfm__srphp M06] twin of the started path: full
-     * `Throwable` containment — a scrobble failure must never surface in
+     * Twin of the started path: full `Throwable` containment — a scrobble
+     * failure must never surface in
      * the user's stop-request flow.
      */
     public function onPlaybackStopped(PlaybackStopped $event): void
@@ -246,7 +245,7 @@ class LastfmScrobbler
     private function handlePlaybackStopped(PlaybackStopped $event): void
     {
         $this->ensureSchema();
-        // M-05: replay due transients first — the queue rides on real stop
+        // Replay due transients first — the queue rides on real stop
         // events, so no timer/worker is needed (scrobbles carry explicit
         // timestamps; Last.fm dedups, late arrival is spec-legal).
         $this->drainRetryQueue();
@@ -287,8 +286,8 @@ class LastfmScrobbler
             is_string($track['album'] ?? null) ? $track['album'] : null,
             $startedAt,
         );
-        // M-04 [review lastfm__srphp M04] twin of the now-playing path:
-        // failed submissions are logged, never dropped.
+        // Twin of the now-playing path: failed submissions are logged,
+        // never dropped.
         if ($outcome->success) {
             return;
         }
@@ -299,8 +298,8 @@ class LastfmScrobbler
             $this->purgeSessionIfInvalid($outcome, $event->userId);
             return;
         }
-        // M-05 [review lastfm__srphp M03]: a transient failure is NOT the end
-        // of the story — queue the submission for replay (attempt 1 spent).
+        // A transient failure is NOT the end of the story — queue the
+        // submission for replay (attempt 1 spent).
         if ($outcome->transient) {
             $this->enqueueScrobble([
                 'user_id'     => $event->userId,
@@ -322,12 +321,12 @@ class LastfmScrobbler
     }
 
     /**
-     * Replay due entries of the transient retry queue [M-05].
+     * Replay due entries of the transient retry queue.
      *
      * Budgeted ({@see self::MAX_DRAIN_PER_EVENT} per event) so a long
      * outage cannot turn one stop event into a blocking burst; immature
-     * jobs (Retry-After not elapsed) stay put. Runs inside the M-06
-     * containment boundary of the stop handler.
+     * jobs (Retry-After not elapsed) stay put. Runs inside the
+     * `Throwable` containment boundary of the stop handler.
      */
     private function drainRetryQueue(): void
     {
@@ -382,7 +381,7 @@ class LastfmScrobbler
 
     /**
      * Append to the bounded queue, evicting the oldest entry (loudly) past
-     * the ceiling [M-05].
+     * the ceiling.
      *
      * @param array{user_id:string,session_key:string,track:string,artist:string,album:?string,timestamp:int,attempts:int,not_before:float} $job
      */
@@ -399,7 +398,7 @@ class LastfmScrobbler
 
     /**
      * A dead credential's pending replays are dead too: drop the user's
-     * queued jobs when their session is purged [M-05 × M-02].
+     * queued jobs when their session is purged.
      */
     private function dropQueuedForUser(string $userId): void
     {
@@ -410,7 +409,7 @@ class LastfmScrobbler
     }
 
     /**
-     * Self-heal a permanently rejected session [review lastfm__secaudit M-1].
+     * Self-heal a permanently rejected session.
      *
      * When the API answers with an invalid-session envelope code, the
      * stored `session_key` will fail on EVERY future event: the plugin
@@ -420,7 +419,7 @@ class LastfmScrobbler
      * connected is the host's read law); the user re-authenticates through
      * the normal OAuth flow. Cleanup failure is contained locally with its
      * own warning — it must never replace the diagnostic that already
-     * fired, and never throws into the (M-06) boundary.
+     * fired, and never throws into the `Throwable` boundary.
      */
     private function purgeSessionIfInvalid(LastfmOutcome $outcome, string $userId): void
     {

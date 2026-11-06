@@ -20,7 +20,7 @@ namespace Phlix\Plugins\Scrobbler\Lastfm;
  * There is deliberately no config-file path: earlier revisions shipped a
  * bundled `config/lastfm.php` that no code ever loaded (the settings are
  * per-installation DB state, not files), and it was removed as a ghost
- * setup path [review lastfm__docmaint M-01].
+ * setup path.
  *
  * Centralises the read of the Last.fm settings slice so other classes do
  * not duplicate the `is_string()`/`is_bool()` ladder.

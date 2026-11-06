@@ -26,14 +26,14 @@ use Workerman\MySQL\Connection;
  * The column exists for cross-repo schema parity with the host's
  * `lastfm_sessions` shape (phlix-server migrations 023/089 create the same
  * column) and its NULL == "does not expire" semantics; dropping it here
- * would fork the mirrored schema for zero benefit [review lastfm minors W-min49].
+ * would fork the mirrored schema for zero benefit.
  *
  * @internal  Called by {@see \Phlix\Plugins\Scrobbler\Lastfm\Database\LastfmMigrationRunner}.
  * @since 0.15.0
  */
 final class CreateLastfmSessionsTable implements MigrationInterface
 {
-    /** @var string Human-readable migration name used by the runner. */
+    /** @var string Human-readable migration name; the runner dispatches by class and does not consult it. */
     public const NAME = 'create_lastfm_sessions';
 
     /**

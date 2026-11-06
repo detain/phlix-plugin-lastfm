@@ -35,7 +35,8 @@ final class LastfmPluginAdditionalCoverageTest extends TestCase
     /**
      * Test that subscribedEvents closures invoke scrobbler methods correctly.
      * This tests the actual invocation path, not just that closures are returned.
-     * This covers lines 157-159 and 160-162 in subscribedEvents.
+     * Exercises the PlaybackStarted and PlaybackStopped closures
+     * returned by LastfmPlugin::subscribedEvents().
      */
     public function testSubscribedEventsClosuresInvokeScrobblerUpdateNowPlaying(): void
     {
@@ -84,7 +85,8 @@ final class LastfmPluginAdditionalCoverageTest extends TestCase
 
     /**
      * Test that subscribedEvents closures invoke scrobbler scrobble method when rules are met.
-     * This covers lines 160-162 (the scrobble path) in subscribedEvents.
+     * Exercises the PlaybackStopped (scrobble) closure returned
+     * by LastfmPlugin::subscribedEvents().
      */
     public function testSubscribedEventsClosuresInvokeScrobblerScrobble(): void
     {

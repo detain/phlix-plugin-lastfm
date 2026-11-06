@@ -294,7 +294,7 @@ final class LastfmPlugin implements LifecycleInterface, ConfigurableInterface
     {
         if (!class_exists(\Workerman\Http\Client::class)) {
             $this->logger->warning('Last.fm: workerman/http-client not available, using sync fallback');
-            return \Phlix\Plugins\Scrobbler\Lastfm\LastfmApi::defaultHttp();
+            return LastfmApi::defaultHttp();
         }
 
         // 3-second connect timeout, 10-second transfer timeout — keeps things snappy.
@@ -311,7 +311,7 @@ final class LastfmPlugin implements LifecycleInterface, ConfigurableInterface
         // the gate routes accordingly and warns once.
         return self::contextGatedRunner(
             self::buildCooperativeRunner($client),
-            \Phlix\Plugins\Scrobbler\Lastfm\LastfmApi::defaultHttp(),
+            LastfmApi::defaultHttp(),
             static fn (): bool => self::cooperativeContextAvailable(),
             $this->logger,
         );

@@ -19,8 +19,8 @@ namespace Phlix\Plugins\Scrobbler\Lastfm;
  * Last.fm signals failures as an HTTP 200 whose body carries an error
  * envelope (`{"error":N,"message":"..."}`); the previous bool surface
  * collapsed "rejected with a reason" and "transport never answered" into
- * the same indistinguishable `false`, and callers discarded it entirely
- * [review lastfm__srphp M-04]. The outcome keeps the reason (response-side
+ * the same indistinguishable `false`, and callers discarded it entirely.
+ * The outcome keeps the reason (response-side
  * fields only — Last.fm error envelopes never carry request credentials, so
  * {@see self::logContext()} is safe to hand to a logger).
  *
@@ -36,7 +36,7 @@ final class LastfmOutcome
      * 17 = login was required, 88 = invalid session key per the current
      * docs. Everything else (permission, throttling, item availability)
      * says nothing about session liveness. The typed classification
-     * replaces raw code branching in callers [review lastfm__secaudit M-1].
+     * replaces raw code branching in callers.
      *
      * @var list<int>
      */
@@ -50,7 +50,7 @@ final class LastfmOutcome
      *                                  (null = not reported — shape variance kept permissive).
      * @param int|null    $ignored      Scrobble verdict: `@attr` ignored count (null = not reported).
      * @param string|null $ignoreReason Per-scrobble ignore reason (banned/duplicate/…) when reported.
-     * @param bool        $transient    M-05: the failure is retryable (transport drop,
+     * @param bool        $transient    The failure is retryable (transport drop,
      *                                  429/>=500, or envelope rate-limit 29) rather than terminal.
      * @param int|null    $retryAfterSeconds Seconds the server asked us to wait (Retry-After
      *                                  header, seconds form), when it said so.
@@ -77,9 +77,9 @@ final class LastfmOutcome
      * The call was not accepted — by envelope code (when the API answered)
      * or silently (transport failure / non-2xx / unparseable body).
      *
-     * `$transient`/`$retryAfterSeconds` carry the M-05 retry verdict so
+     * `$transient`/`$retryAfterSeconds` carry the retry verdict so
      * callers branch on the typed facet instead of re-reading codes; the
-     * defaults keep every pre-M-05 call site (and terminal failure) honest.
+     * defaults keep every pre-retry call site (and terminal failure) honest.
      */
     public static function failure(
         ?int $errorCode = null,
@@ -93,7 +93,7 @@ final class LastfmOutcome
     /**
      * Scrobble whose recorded `@attr` verdict reports full acceptance.
      *
-     * @since M-03 [review lastfm__srphp M03]
+     * @since 1.2.0
      */
     public static function scrobbleAccepted(int $accepted): self
     {
@@ -104,9 +104,9 @@ final class LastfmOutcome
      * Scrobble answered 200 with no top-level error whose `@attr` reports
      * ignored > 0 — Last.fm REFUSED the submission (banned channel,
      * timestamp rules, quality filter). Reporting this as success left
-     * users with unexplained holes in their history [review lastfm__srphp M03].
+     * users with unexplained holes in their history.
      *
-     * @since M-03 [review lastfm__srphp M03]
+     * @since 1.2.0
      */
     public static function scrobbleRejected(int $accepted, int $ignored, ?string $ignoreReason): self
     {

@@ -44,7 +44,7 @@ final class LastfmScrobblerNowPlayingCoverageTest extends TestCase
 
     /**
      * Test that onPlaybackStopped skips when track has null title.
-     * This covers the null title check at line 169-170 in LastfmScrobbler.
+     * Exercises the null-title check in LastfmScrobbler::handlePlaybackStopped().
      */
     public function testOnPlaybackStoppedSkipsWhenTrackHasNullTitle(): void
     {
@@ -65,7 +65,7 @@ final class LastfmScrobblerNowPlayingCoverageTest extends TestCase
 
     /**
      * Test that onPlaybackStopped skips when track has null artist.
-     * This covers the null artist check at line 169-170 in LastfmScrobbler.
+     * Exercises the null-artist check in LastfmScrobbler::handlePlaybackStopped().
      */
     public function testOnPlaybackStoppedSkipsWhenTrackHasNullArtist(): void
     {

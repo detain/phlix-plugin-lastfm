@@ -84,7 +84,7 @@ class LastfmSessionRepository
      *
      * Uses the row-alias upsert form (`... AS new`, MySQL 8.0.19+); the
      * `VALUES()` spelling inside `ON DUPLICATE KEY UPDATE` is deprecated
-     * since 8.0.20 [review lastfm__srphp M-18].
+     * since 8.0.20.
      *
      * @param string $userId     Phlix user UUID.
      * @param string $sessionKey Session key returned by `auth.getSession`.
@@ -104,8 +104,7 @@ class LastfmSessionRepository
 
     /**
      * Remove a user's Last.fm session — used when the user disconnects and
-     * by the scrobbler's invalid-session self-heal
-     * [review lastfm__secaudit M-1].
+     * by the scrobbler's invalid-session self-heal.
      *
      * @param string $userId Phlix user UUID.
      */

@@ -39,7 +39,7 @@ final class LastfmSessionRepositoryEdgeCasesTest extends TestCase
 
     /**
      * Test that findByUserId returns null when the first row is not an array.
-     * This covers the defensive check at line 54 in LastfmSessionRepository.
+     * Exercises the non-array first-row guard in LastfmSessionRepository::findByUserId().
      */
     public function testFindByUserIdReturnsNullWhenRowIsNotAnArray(): void
     {

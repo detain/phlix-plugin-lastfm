@@ -68,8 +68,7 @@ Configure these in the Phlix admin **Plugins → Configure** dialog.
 `api_key` is deliberately **not** marked `secret` while `shared_secret` is:
 a Last.fm API key is a public client identifier — the web-auth flow embeds it
 in the browser-facing authorization URL by design — whereas the shared secret
-is signing material that never leaves the server and is masked in the admin UI
-[review lastfm minors W-min49].
+is signing material that never leaves the server and is masked in the admin UI.
 
 ## Development
 

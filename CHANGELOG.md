@@ -2,10 +2,9 @@
 
 All notable changes to this plugin are documented here. The format follows
 Keep a Changelog; versions follow SemVer. Catalog release entries are built
-from git tags, so the `1.2.0` work below becomes visible to consumers when
-its tag lands (tagging is an owner action).
+from git tags; the `1.2.0` tag landed on 2026-11-02.
 
-## [1.2.0] — unreleased (plugin.json ahead of the published `v1.1.0` tag)
+## [1.2.0] — 2026-11-02 (tag `v1.2.0`)
 
 ### Fixed
 

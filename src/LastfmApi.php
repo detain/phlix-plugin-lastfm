@@ -46,10 +46,10 @@ class LastfmApi
     public const API_ROOT = 'https://ws.audioscrobbler.com/2.0/';
 
     /**
-     * M-05 [review lastfm__srphp M03]: Last.fm is a courtesy-polite API;
-     * hammering it during a transient outage converts backoff into harder
-     * throttling. One client instance == one API key in this plugin, so a
-     * per-instance minimum dispatch interval is the honest pacing seam.
+     * Last.fm is a courtesy-polite API; hammering it during a transient
+     * outage converts backoff into harder throttling. One client instance
+     * == one API key in this plugin, so a per-instance minimum dispatch
+     * interval is the honest pacing seam.
      */
     public const DEFAULT_MIN_INTERVAL_SECONDS = 0.2;
 
@@ -58,7 +58,7 @@ class LastfmApi
      * limit — the docs list 29 as "API key is disabled", and live traffic
      * also returns it for daily/hourly throttling. Either way the fix is
      * operator/upstream-side and WAITING is the correct client behavior,
-     * so it classifies as transient [review lastfm__srphp M03].
+     * so it classifies as transient.
      */
     public const RATE_LIMIT_ENVELOPE_CODE = 29;
 
@@ -67,7 +67,7 @@ class LastfmApi
      * VARCHAR(64) columns of `lastfm_sessions`
      * (src/Database/Migrations/CreateLastfmSessionsTable.php) — oversized
      * wire values are refused at the API boundary rather than reaching
-     * storage [review lastfm__secaudit m-4].
+     * storage.
      */
     public const MAX_SESSION_FIELD_BYTES = 64;
 
@@ -92,7 +92,7 @@ class LastfmApi
      * @param (callable(string, string, array<string, string>): array{status: int, body: string, headers?: array<array-key, mixed>})|null $http
      *        Optional HTTP runner override (test hook).
      * @param float|null                          $minIntervalSeconds
-     *        Pacing floor between dispatches (M-05). Null = {@see self::DEFAULT_MIN_INTERVAL_SECONDS};
+     *        Pacing floor between dispatches. Null = {@see self::DEFAULT_MIN_INTERVAL_SECONDS};
      *        0 disables pacing (unit tests).
      */
     public function __construct(
@@ -159,8 +159,7 @@ class LastfmApi
     /**
      * Parse a session field arriving from the wire into the shape the
      * VARCHAR(64) columns accept — trimmed, non-empty, ≤64 bytes, free of
-     * ASCII control characters — or refuse it (null) at the boundary
-     * [review lastfm__secaudit m-4].
+     * ASCII control characters — or refuse it (null) at the boundary.
      *
      * The byte cap is deliberately stricter than the column's character
      * count: oversized or control-laden values from a hostile/compromised
@@ -217,11 +216,11 @@ class LastfmApi
         $response = $this->dispatch($params);
         $decoded = $response['decoded'];
         if ($decoded !== null && !isset($decoded['error'])) {
-            // M-23 [review lastfm minors W-min49]: an "ok-shaped" body that is
-            // not the documented `nowplaying` payload still counts as success
-            // (the permissive verdict survives upstream shape variance by
-            // design) but leaves a debug breadcrumb rather than passing in
-            // total silence — the milder twin of the scrobble @attr story.
+            // An "ok-shaped" body that is not the documented `nowplaying`
+            // payload still counts as success (the permissive verdict
+            // survives upstream shape variance by design) but leaves a
+            // debug breadcrumb rather than passing in total silence — the
+            // milder twin of the scrobble @attr story.
             if (!isset($decoded['nowplaying'])) {
                 $this->logger->debug('Last.fm now-playing reply carried no `nowplaying` echo', [
                     'method' => 'track.updateNowPlaying',
@@ -243,8 +242,7 @@ class LastfmApi
      * The returned verdict is Last.fm's own: a 200 whose
      * `scrobbles.@attr.ignored` count is positive is a REFUSAL
      * (`scrobbleRejected`, reason carried when the API reports one), never
-     * a success — HTTP-level "no error" alone is not acceptance
-     * [review lastfm__srphp M-03].
+     * a success — HTTP-level "no error" alone is not acceptance.
      *
      * @param string      $sessionKey Authenticated session key.
      * @param string      $track      Track title.
@@ -336,11 +334,11 @@ class LastfmApi
     /**
      * One signed API dispatch: pacing, transport, status handling, decode.
      *
-     * M-05 [review lastfm__srphp M03]: the old shape returned bare `?array`,
-     * which threw away the HTTP status and headers — the very signals that
-     * separate a retryable hiccup (transport drop, 429, 5xx, envelope 29)
-     * from a terminal rejection. The dispatch result is the parsed boundary
-     * the classification layer reads instead of guessing.
+     * The old shape returned bare `?array`, which threw away the HTTP
+     * status and headers — the very signals that separate a retryable
+     * hiccup (transport drop, 429, 5xx, envelope 29) from a terminal
+     * rejection. The dispatch result is the parsed boundary the
+     * classification layer reads instead of guessing.
      *
      * The runner result is normalized here (contract: `array{status:int,
      * body:string, headers?:array}`): a third-party runner missing keys can
@@ -380,12 +378,12 @@ class LastfmApi
 
         $decoded = self::decodeObject($payload);
         if ($decoded !== null && isset($decoded['error'])) {
-            // M-04 [review lastfm__srphp M04]: Last.fm signals a revoked or
-            // stale session as HTTP 200 + error envelope; the non-2xx branch
-            // above was the only site that ever logged, so a permanently
-            // broken integration was silent forever. Response bodies carry
-            // no request credentials (api_key/sk are request-side), so the
-            // code+message are safe to log.
+            // Last.fm signals a revoked or stale session as HTTP 200 +
+            // error envelope; the non-2xx branch above was the only site
+            // that ever logged, so a permanently broken integration was
+            // silent forever. Response bodies carry no request credentials
+            // (api_key/sk are request-side), so the code+message are safe
+            // to log.
             $this->logger->warning('Last.fm API error envelope', [
                 'error'   => self::envelopeCode($decoded),
                 'message' => self::envelopeMessage($decoded),
@@ -396,7 +394,7 @@ class LastfmApi
     }
 
     /**
-     * Enforce the per-instance pacing floor before a dispatch [M-05].
+     * Enforce the per-instance pacing floor before a dispatch.
      *
      * Under Swoole coroutine hooks `usleep` yields instead of blocking the
      * worker, and the fallback stream runner is a blocking path anyway — the
@@ -418,8 +416,7 @@ class LastfmApi
     }
 
     /**
-     * The typed failure verdict for a dispatch that did not succeed
-     * [review lastfm__srphp M03].
+     * The typed failure verdict for a dispatch that did not succeed.
      *
      * Transient ⟺ transport drop (status 0), HTTP 429, HTTP >= 500, or an
      * envelope carrying {@see self::RATE_LIMIT_ENVELOPE_CODE}. Everything
@@ -497,12 +494,12 @@ class LastfmApi
      * Map a decoded 2xx **scrobble** body (no top-level error) to a typed
      * outcome via Last.fm's per-submission verdict channel.
      *
-     * M-03 [review lastfm__srphp M03]: `track.scrobble` answers a REFUSED
-     * submission with HTTP 200, no `error`, and `scrobbles.@attr` counts
-     * (`accepted`/`ignored`) plus a per-scrobble `ignore` reason (banned
-     * channel, timestamp rules, quality filter). Treating that shape as
-     * success reported listens as recorded while holes appeared in the
-     * user's history with zero diagnostic trail.
+     * `track.scrobble` answers a REFUSED submission with HTTP 200, no
+     * `error`, and `scrobbles.@attr` counts (`accepted`/`ignored`) plus a
+     * per-scrobble `ignore` reason (banned channel, timestamp rules,
+     * quality filter). Treating that shape as success reported listens as
+     * recorded while holes appeared in the user's history with zero
+     * diagnostic trail.
      *
      * The parse is cast-guarded end to end: an absent or non-numeric
      * `@attr` keeps the permissive verdict, so upstream shape variance can
@@ -612,8 +609,9 @@ class LastfmApi
      * Transport errors (DNS failure, connection refused, timeout) result in
      * a zero-status response so the caller can distinguish them from 2xx
      * responses via the status code. Response headers are parsed from
-     * `$http_response_header` (M-05 needs Retry-After; duplicate header
-     * names collapse last-wins, which Retry-After never legitimately hits).
+     * `$http_response_header` (the retry verdict needs Retry-After;
+     * duplicate header names collapse last-wins, which Retry-After never
+     * legitimately hits).
      *
      * @return callable(string $url, string $body, array<string, string> $headers): array{status: int, body: string, headers: array<string, string>}
      */

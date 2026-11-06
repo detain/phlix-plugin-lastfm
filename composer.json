@@ -17,7 +17,6 @@
     },
     "require-dev": {
         "phpstan/phpstan": "^2.2",
-        "phpstan/phpstan-phpunit": "^2.0",
         "phpunit/phpunit": "^10.0",
         "react/promise": "^3.3",
         "workerman/http-client": "^3.1"
