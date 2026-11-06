@@ -26,7 +26,7 @@ namespace Phlix\Plugins\Scrobbler\Lastfm;
  * not duplicate the `is_string()`/`is_bool()` ladder.
  *
  * @package Phlix\Plugins\Scrobbler\Lastfm
- * @since 0.15.0
+ * @since 1.1.0
  */
 final class LastfmConfig
 {

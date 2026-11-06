@@ -32,7 +32,7 @@ use Psr\Log\NullLogger;
  * On `disable` the scrobbler is released so the next enable rebuilds it.
  *
  * @package Phlix\Plugins\Scrobbler\Lastfm
- * @since 0.15.0
+ * @since 1.1.0
  */
 final class LastfmPlugin implements LifecycleInterface, ConfigurableInterface
 {
@@ -78,7 +78,8 @@ final class LastfmPlugin implements LifecycleInterface, ConfigurableInterface
     /**
      * WIRE step (boot-safe): construct + subscribe ONLY. NO migrations, NO
      * DB queries, NO network — this runs across every worker at boot and
-     * MUST never block or throw (the item-5c3 landmine).
+     * MUST never block or throw: a stall or fatal here takes down every
+     * worker on the host.
      *
      * Resolution graph (all lazy/construct-only):
      *   - {@see LastfmApi} (constructed inline from config + async runner)
@@ -199,9 +200,8 @@ final class LastfmPlugin implements LifecycleInterface, ConfigurableInterface
      *
      * The returned closure is handed to the {@see LastfmScrobbler}, which
      * invokes it (guarded, at most once) on the FIRST playback event it
-     * processes — NOT at boot/enable. This is the boot-safety split for the
-     * item-5c3 landmine: `onEnable()` must do zero I/O, so migrations can
-     * no longer run there.
+     * processes — NOT at boot/enable. This is the boot-safety split:
+     * `onEnable()` must do zero I/O, so migrations can no longer run there.
      *
      * When invoked, the closure resolves a {@see LastfmMigrationRunner}
      * from the container and calls {@see LastfmMigrationRunner::run()}. The
@@ -305,10 +305,10 @@ final class LastfmPlugin implements LifecycleInterface, ConfigurableInterface
             'connect_timeout' => 3,
         ]);
 
-        // The cooperative rendezvous only parks safely inside a coroutine
-        // (see SV-0.4 law on phlix-server src/Hub/HttpClient.php). Outside a
-        // coroutine the blocking stream runner is the only honest choice —
-        // the gate routes accordingly and warns once.
+        // The cooperative rendezvous only parks safely inside a coroutine:
+        // outside one, the channel pop blocks the whole worker instead of
+        // yielding. Outside a coroutine the blocking stream runner is the
+        // only honest choice — the gate routes accordingly and warns once.
         return self::contextGatedRunner(
             self::buildCooperativeRunner($client),
             LastfmApi::defaultHttp(),
@@ -369,8 +369,7 @@ final class LastfmPlugin implements LifecycleInterface, ConfigurableInterface
 
     /**
      * Wrap a {@see \Workerman\Http\Client} in the canonical Phlix
-     * cooperative-wait runner (see phlix-server `CLAUDE.md` "Async
-     * Patterns" and the SV-0.4 law on `src/Hub/HttpClient.php`).
+     * cooperative-wait runner.
      *
      * The request is fired with `success`/`error` callbacks (async, does
      * NOT block the event loop), then the caller parks on a one-slot
@@ -443,7 +442,8 @@ final class LastfmPlugin implements LifecycleInterface, ConfigurableInterface
 
             if ($await() !== true) {
                 // Waited out the ceiling with no response — indistinguishable
-                // from a transport failure (C6 law: zero status = transient).
+                // from a transport failure, so it is reported as one (a zero
+                // status classifies the outcome as transient downstream).
                 return ['status' => 0, 'body' => '', 'headers' => []];
             }
 

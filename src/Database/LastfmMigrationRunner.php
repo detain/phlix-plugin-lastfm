@@ -23,7 +23,7 @@ namespace Phlix\Plugins\Scrobbler\Lastfm\Database;
  * `onEnable()` must not run migrations or touch the database.
  *
  * @package Phlix\Plugins\Scrobbler\Lastfm\Database
- * @since 0.15.0
+ * @since 1.1.0
  */
 final class LastfmMigrationRunner
 {

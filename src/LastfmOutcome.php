@@ -25,7 +25,7 @@ namespace Phlix\Plugins\Scrobbler\Lastfm;
  * {@see self::logContext()} is safe to hand to a logger).
  *
  * @package Phlix\Plugins\Scrobbler\Lastfm
- * @since 1.2.1
+ * @since 1.2.0
  */
 final class LastfmOutcome
 {

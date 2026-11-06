@@ -50,4 +50,34 @@ final class LastfmMigrationRunnerTest extends TestCase
             );
         }
     }
+
+    /**
+     * Fresh-install truth: the `connected_at` column COMMENT ships in the
+     * repo's American register ("authorized"), matching README.md. Existing
+     * tables keep whatever comment they were created with — CREATE TABLE IF
+     * NOT EXISTS never revises a present table — so this pins new ones.
+     */
+    public function testFreshInstallDdlCommentSpellsAuthorizedInAmericanRegister(): void
+    {
+        $queries = [];
+        $conn = $this->createMock(\Workerman\MySQL\Connection::class);
+        $conn->method('query')->willReturnCallback(function (string $sql) use (&$queries) {
+            $queries[] = $sql;
+            return [];
+        });
+
+        (new LastfmMigrationRunner($conn))->run();
+
+        self::assertCount(1, $queries, 'one migration is issued per run()');
+        self::assertStringContainsString(
+            'When the user authorized access',
+            $queries[0],
+            'the connected_at comment must use the repo register (American "authorized")',
+        );
+        self::assertStringNotContainsString(
+            'authorised',
+            $queries[0],
+            'no British variant may ship into the fresh-install schema',
+        );
+    }
 }

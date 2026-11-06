@@ -38,7 +38,7 @@ use Psr\Log\NullLogger;
  * `workerman/http-client`.
  *
  * @package Phlix\Plugins\Scrobbler\Lastfm
- * @since 0.15.0
+ * @since 1.1.0
  */
 class LastfmApi
 {
@@ -222,7 +222,7 @@ class LastfmApi
             // debug breadcrumb rather than passing in total silence — the
             // milder twin of the scrobble @attr story.
             if (!isset($decoded['nowplaying'])) {
-                $this->logger->debug('Last.fm now-playing reply carried no `nowplaying` echo', [
+                $this->logger->debug('Last.fm now-playing reply carried no nowplaying echo', [
                     'method' => 'track.updateNowPlaying',
                 ]);
             }

@@ -32,7 +32,7 @@ use Psr\Log\NullLogger;
  * Only when both gates pass is {@see LastfmApi::scrobble()} invoked.
  *
  * @package Phlix\Plugins\Scrobbler\Lastfm
- * @since 0.15.0
+ * @since 1.1.0
  */
 class LastfmScrobbler
 {

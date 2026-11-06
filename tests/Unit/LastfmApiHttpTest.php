@@ -264,6 +264,11 @@ final class LastfmApiHttpTest extends TestCase
         $this->assertTrue($outcome->success, 'absent echo must stay permissive (at most a debug line)');
         $this->assertCount(1, $debugs, 'an ok-shaped reply without the `nowplaying` echo logs one debug line');
         $this->assertStringContainsString('nowplaying', $debugs[0]['message']);
+        $this->assertStringNotContainsString(
+            '`',
+            $debugs[0]['message'],
+            'a runtime log message carries prose, not documentation markup',
+        );
     }
 
     /** The documented echo path stays silent — no debug noise for healthy replies. */
