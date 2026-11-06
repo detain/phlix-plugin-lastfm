@@ -16,6 +16,8 @@ use Phlix\Plugins\Scrobbler\Lastfm\LastfmApi;
 use Phlix\Plugins\Scrobbler\Lastfm\LastfmOutcome;
 use Phlix\Plugins\Scrobbler\Lastfm\LastfmScrobbler;
 use Phlix\Plugins\Scrobbler\Lastfm\LastfmSessionRepository;
+use Phlix\Plugins\Scrobbler\Lastfm\LogSafety;
+use Phlix\Plugins\Scrobbler\Lastfm\PlaybackTicks;
 use Phlix\Shared\Events\Playback\PlaybackStarted;
 use Phlix\Shared\Events\Playback\PlaybackStopped;
 use Psr\Log\NullLogger;
@@ -118,7 +120,7 @@ final class LastfmScrobblerTest extends TestCase
             'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
         ]);
 
-        $event = new PlaybackStopped('s', 'u1', 'm', 'd', $playedSeconds * 10_000_000, true);
+        $event = new PlaybackStopped('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds($playedSeconds), true);
         $scrobbler->onPlaybackStopped($event);
     }
 
@@ -132,7 +134,7 @@ final class LastfmScrobblerTest extends TestCase
         $scrobbler = $this->buildScrobbler(static fn (string $_id) => [
             'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => null,
         ]);
-        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', 1_000_000_000, false));
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(100), false));
     }
 
     public function testOnPlaybackStoppedSkipsWhenUnderThreshold(): void
@@ -146,7 +148,7 @@ final class LastfmScrobblerTest extends TestCase
         $scrobbler = $this->buildScrobbler(static fn (string $_id) => [
             'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
         ]);
-        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', 30 * 10_000_000, false));
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(30), false));
     }
 
     public function testOnPlaybackStoppedSkipsWhenNoSession(): void
@@ -157,7 +159,7 @@ final class LastfmScrobblerTest extends TestCase
         $scrobbler = $this->buildScrobbler(static fn (string $_id) => [
             'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
         ]);
-        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', 200 * 10_000_000, true));
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(200), true));
     }
 
     /**
@@ -216,7 +218,7 @@ final class LastfmScrobblerTest extends TestCase
             'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
         ], $logger);
 
-        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', 101 * 10_000_000, true));
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(101), true));
 
         $this->assertCount(1, $warnings);
         $this->assertSame('Last.fm scrobble submission failed', $warnings[0]['message']);
@@ -242,7 +244,7 @@ final class LastfmScrobblerTest extends TestCase
             'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
         ], $this->warningCollector($warnings));
 
-        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', 101 * 10_000_000, true));
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(101), true));
 
         $this->assertCount(1, $warnings);
         $this->assertSame('Last.fm scrobble submission failed', $warnings[0]['message']);
@@ -287,7 +289,7 @@ final class LastfmScrobblerTest extends TestCase
             throw new \LogicException('resolver exploded');
         }, $this->warningCollector($warnings));
 
-        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', 101 * 10_000_000, true));
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(101), true));
 
         $this->assertCount(1, $warnings);
         $this->assertSame('Last.fm playback hook failed', $warnings[0]['message']);
@@ -307,7 +309,7 @@ final class LastfmScrobblerTest extends TestCase
             'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
         ], $this->warningCollector($warnings));
 
-        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', 101 * 10_000_000, true));
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(101), true));
 
         $this->assertCount(1, $warnings);
         $this->assertSame('playback.stopped', $warnings[0]['context']['hook']);
@@ -358,7 +360,7 @@ final class LastfmScrobblerTest extends TestCase
         $scrobbler = $this->buildScrobbler(static fn (string $_id) => [
             'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
         ]);
-        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', 101 * 10_000_000, true));
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(101), true));
     }
 
     /**
@@ -444,7 +446,7 @@ final class LastfmScrobblerTest extends TestCase
             'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
         ], $this->warningCollector($warnings));
 
-        $stop = new PlaybackStopped('s', 'u1', 'm', 'd', 101 * 10_000_000, true);
+        $stop = new PlaybackStopped('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(101), true);
         $scrobbler->onPlaybackStopped($stop);
         $this->assertCount(1, $this->readQueue($scrobbler));
         $this->assertContains('Last.fm scrobble queued for retry', array_column($warnings, 'message'));
@@ -465,7 +467,7 @@ final class LastfmScrobblerTest extends TestCase
         $scrobbler = $this->buildScrobbler(static fn (string $_id) => [
             'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
         ]);
-        $stop = new PlaybackStopped('s', 'u1', 'm', 'd', 101 * 10_000_000, true);
+        $stop = new PlaybackStopped('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(101), true);
         $scrobbler->onPlaybackStopped($stop);
         $scrobbler->onPlaybackStopped($stop);
 
@@ -484,7 +486,7 @@ final class LastfmScrobblerTest extends TestCase
         $scrobbler = $this->buildScrobbler(static fn (string $_id) => [
             'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
         ]);
-        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', 101 * 10_000_000, true));
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(101), true));
         // Queued with not_before ≈ now+600: the NEXT live attempt (none here)
         // and a further stop event must not touch it… event 1's own failure
         // IS the single call; a second event would be call 2 — assert queue
@@ -510,7 +512,7 @@ final class LastfmScrobblerTest extends TestCase
         ], $this->warningCollector($warnings));
         $this->seedQueue($scrobbler, [$this->queuedJob('Old', LastfmScrobbler::MAX_SCROBBLE_ATTEMPTS)]);
 
-        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', 101 * 10_000_000, true));
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(101), true));
 
         $this->assertContains('Last.fm queued scrobble dropped after exhausting retries', array_column($warnings, 'message'));
         $queue = $this->readQueue($scrobbler);
@@ -539,7 +541,7 @@ final class LastfmScrobblerTest extends TestCase
         }
         $this->seedQueue($scrobbler, $jobs);
 
-        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', 101 * 10_000_000, true));
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(101), true));
 
         $this->assertContains('Last.fm scrobble retry queue overflow — oldest submission dropped', array_column($warnings, 'message'));
         $queue = $this->readQueue($scrobbler);
@@ -565,11 +567,42 @@ final class LastfmScrobblerTest extends TestCase
             $this->queuedJob('Other', 1, microtime(true) + 600, 'u2'),
         ]);
 
-        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', 101 * 10_000_000, true));
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(101), true));
 
         $queue = $this->readQueue($scrobbler);
         $this->assertCount(1, $queue);
         $this->assertSame('u2', $queue[0]['user_id'], 'other users keep their queues');
+    }
+
+    /**
+     * PG-150 twin (review lastfm__secaudit info): the host connection class
+     * re-materializes bound values into exception text (emulated prepares),
+     * so a hook-failure message forwarded into the log is BOUNDED at the
+     * boundary — the diagnostic head survives for triage, an oversized
+     * tail (whatever it carries) never reaches the log line.
+     */
+    public function testHookFailureExceptionTextIsBoundedInLogs(): void
+    {
+        $longMessage = 'SQLSTATE[HY000]: MySQL server has gone away — query was '
+            . str_repeat('x', 4096)
+            . " sk=NEVER-LOG-THIS-TAIL";
+        $this->sessions->method('findByUserId')->willThrowException(new \RuntimeException($longMessage));
+
+        /** @var array<int, array{message: string, context: array<string, mixed>}> $warnings */
+        $warnings = [];
+        $scrobbler = $this->buildScrobbler(static fn (string $_id) => null, $this->warningCollector($warnings));
+
+        $scrobbler->onPlaybackStarted(new PlaybackStarted('sess', 'u1', 'media-1', 'device', 0));
+
+        $this->assertCount(1, $warnings);
+        $error = (string) $warnings[0]['context']['error'];
+        $this->assertStringContainsString('gone away', $error, 'the diagnostic head survives the bound');
+        $this->assertStringNotContainsString('NEVER-LOG-THIS-TAIL', $error);
+        $this->assertLessThanOrEqual(
+            LogSafety::MAX_EXCEPTION_MESSAGE_BYTES + LogSafety::MAX_MARKER_BYTES,
+            strlen($error),
+        );
+        $this->assertStringContainsString('truncated', $error);
     }
 
     /**

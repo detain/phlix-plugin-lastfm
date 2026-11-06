@@ -388,6 +388,87 @@ final class LastfmPluginTest extends TestCase
         self::assertSame('blocking', $runner('u', 'b', [])['body']);
         self::assertSame('blocking', $runner('u', 'b', [])['body']);
     }
+
+    /**
+     * PG-146 (review lastfm__secaudit M-1): the async client must carry an
+     * EXPLICIT strict TLS context. The pinned vendor default is
+     * verify_peer=false / verify_peer_name=false / allow_self_signed=true
+     * (workerman/http-client v3.1.3, ConnectionPool::create()), and the
+     * vendor merges our subtree OVER those defaults by REPLACING it whole —
+     * so every key that must be on has to be present, including peer_name
+     * (the hostname the vendor would auto-extract is discarded with the
+     * default subtree). Without this the production POST carries api_key,
+     * the per-user session key and api_sig to any self-signed MITM.
+     */
+    public function testAsyncClientOptionsCarryACompleteStrictTlsContext(): void
+    {
+        $options = LastfmPlugin::asyncClientOptions();
+
+        self::assertSame(10, $options['timeout']);
+        self::assertSame(3, $options['connect_timeout']);
+
+        $ssl = $options['context']['ssl'] ?? null;
+        self::assertIsArray($ssl);
+        ksort($ssl);
+        self::assertSame([
+            'allow_self_signed' => false,
+            'peer_name'         => 'ws.audioscrobbler.com',
+            'verify_peer'       => true,
+            'verify_peer_name'  => true,
+        ], $ssl, 'the ssl subtree is replaced wholesale by the vendor merge — it must be complete');
+    }
+
+    /** The pinned peer identity follows the API endpoint constant, not a stray literal. */
+    public function testTlsPeerNameFollowsTheApiRootHost(): void
+    {
+        $ssl = LastfmPlugin::asyncClientOptions()['context']['ssl'];
+        self::assertSame(LastfmApi::API_HOST, $ssl['peer_name']);
+        self::assertSame(LastfmApi::API_HOST, parse_url(LastfmApi::API_ROOT, PHP_URL_HOST));
+    }
+
+    /**
+     * Executed roundtrip through the real pinned vendor: the options the
+     * seam returns are exactly what the vendor ConnectionPool stores — the
+     * same array its create() merges over the insecure defaults.
+     */
+    public function testAsyncClientOptionsAreHandedToTheVendorClientVerbatim(): void
+    {
+        $options = LastfmPlugin::asyncClientOptions();
+        $client = new \Workerman\Http\Client($options);
+
+        $pool = (new \ReflectionProperty(\Workerman\Http\Client::class, '_connectionPool'))->getValue($client);
+        self::assertInstanceOf(\Workerman\Http\ConnectionPool::class, $pool);
+
+        $stored = (new \ReflectionProperty(\Workerman\Http\ConnectionPool::class, 'options'))->getValue($pool);
+        self::assertSame($options['context'], $stored['context']);
+        self::assertSame($options['timeout'], $stored['timeout']);
+        self::assertSame($options['connect_timeout'], $stored['connect_timeout']);
+    }
+
+    /**
+     * Code-shape pin (the S440 guard family idiom): the production client
+     * must be built with the seam's options. An edit that bypasses
+     * asyncClientOptions() with an inline literal — reintroducing the
+     * vendor defaults — reddens here even if every other test stays green.
+     */
+    public function testTheAsyncClientIsConstructedThroughTheStrictOptionsSeam(): void
+    {
+        $method = new \ReflectionMethod(LastfmPlugin::class, 'createAsyncHttpRunner');
+        $lines = file((string) $method->getFileName());
+        self::assertIsArray($lines);
+
+        $body = implode('', array_slice(
+            $lines,
+            $method->getStartLine() - 1,
+            $method->getEndLine() - $method->getStartLine() + 1,
+        ));
+
+        self::assertMatchesRegularExpression(
+            '/new\s+\\\\Workerman\\\\Http\\\\Client\(\s*self::asyncClientOptions\(\)\s*\)/',
+            $body,
+            'createAsyncHttpRunner() must construct the Client from asyncClientOptions()',
+        );
+    }
 }
 
 /**

@@ -42,8 +42,30 @@ use Psr\Log\NullLogger;
  */
 class LastfmApi
 {
+    /**
+     * The Last.fm Web Service host — the single source of truth for both the
+     * endpoint URL below and the TLS peer identity the async client pins
+     * ({@see LastfmPlugin::asyncClientOptions()}).
+     */
+    public const API_HOST = 'ws.audioscrobbler.com';
+
     /** Default Last.fm Web Service endpoint. */
-    public const API_ROOT = 'https://ws.audioscrobbler.com/2.0/';
+    public const API_ROOT = 'https://' . self::API_HOST . '/2.0/';
+
+    /**
+     * Hard ceiling on the size of a response body this client will DECODE.
+     * Honest Last.fm answers to these three methods are kilobytes; a
+     * compromised or DNS-repointed endpoint answering with a giant body
+     * would otherwise push `json_decode` — and the retained associative
+     * array — through a resident worker. An oversized body is refused at the
+     * dispatch normalization step and treated as unparseable, which keeps
+     * the failure shape honest (no fabricated envelope verdict).
+     *
+     * The runner still materializes the bytes it read (a PHP stream read is
+     * not size-cappable mid-flight); the ceiling bounds decode and
+     * retention, which is where the worker-resident cost lives.
+     */
+    public const MAX_RESPONSE_BYTES = 1_048_576;
 
     /**
      * Last.fm is a courtesy-polite API; hammering it during a transient
@@ -363,6 +385,19 @@ class LastfmApi
         $raw = ($this->http)(self::API_ROOT, $body, $headers);
         $status = isset($raw['status']) && is_numeric($raw['status']) ? (int) $raw['status'] : 0;
         $payload = isset($raw['body']) && is_string($raw['body']) ? $raw['body'] : '';
+        if (strlen($payload) > self::MAX_RESPONSE_BYTES) {
+            // The byte ceiling ({@see self::MAX_RESPONSE_BYTES}) refuses to
+            // decode an oversized body: collapsing it to the empty string
+            // routes the response through the same unparseable path a
+            // malformed body takes, so a balloon attack yields an honest
+            // transport-shaped failure instead of a huge retained array.
+            $this->logger->warning('Last.fm API response exceeded the decode size ceiling', [
+                'bytes'     => strlen($payload),
+                'max_bytes' => self::MAX_RESPONSE_BYTES,
+                'method'    => $params['method'] ?? null,
+            ]);
+            $payload = '';
+        }
         /** @var array<array-key, mixed> $responseHeaders */
         $responseHeaders = isset($raw['headers']) && is_array($raw['headers']) ? $raw['headers'] : [];
 
@@ -372,7 +407,9 @@ class LastfmApi
                 'method' => $params['method'] ?? null,
             ]);
             // Last.fm also serves the JSON error envelope on 4xx bodies —
-            // decoding it here costs nothing and feeds the classifier.
+            // decoding it here costs nothing and feeds the classifier. On
+            // every runner: the stream default sets `ignore_errors`, so the
+            // envelope survives even on this blocking path.
             return ['status' => $status, 'decoded' => self::decodeObject($payload), 'headers' => $responseHeaders];
         }
 
@@ -608,10 +645,13 @@ class LastfmApi
      *
      * Transport errors (DNS failure, connection refused, timeout) result in
      * a zero-status response so the caller can distinguish them from 2xx
-     * responses via the status code. Response headers are parsed from
-     * `$http_response_header` (the retry verdict needs Retry-After;
-     * duplicate header names collapse last-wins, which Retry-After never
-     * legitimately hits).
+     * responses via the status code. Non-2xx responses are delivered
+     * COMPLETE: `ignore_errors` keeps the body file_get_contents() would
+     * otherwise discard on any status >= 400, which is exactly where
+     * Last.fm's JSON error envelope (and its classifier-relevant code)
+     * lives. Response headers are parsed from `$http_response_header` (the
+     * retry verdict needs Retry-After; duplicate header names collapse
+     * last-wins, which Retry-After never legitimately hits).
      *
      * @return callable(string $url, string $body, array<string, string> $headers): array{status: int, body: string, headers: array<string, string>}
      */
@@ -624,10 +664,14 @@ class LastfmApi
             }
             $context = stream_context_create([
                 'http' => [
-                    'method'  => 'POST',
-                    'header'  => $headerLines,
-                    'content' => $body,
-                    'timeout' => 10,
+                    'method'        => 'POST',
+                    'header'        => $headerLines,
+                    'content'       => $body,
+                    'timeout'       => 10,
+                    // Without this the wrapper treats >= 400 as a failed
+                    // READ (false, empty body): the 403 carrying envelope 29
+                    // would lose its transient verdict to the classifier.
+                    'ignore_errors' => true,
                 ],
             ]);
             $response = @file_get_contents($url, false, $context);

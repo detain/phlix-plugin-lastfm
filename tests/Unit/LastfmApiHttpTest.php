@@ -405,4 +405,80 @@ final class LastfmApiHttpTest extends TestCase
         $unpaced->updateNowPlaying('SK', 'T2', 'A');
         $this->assertLessThan(0.04, microtime(true) - $start, 'interval 0 disables pacing');
     }
+
+    /**
+     * PG-149 twin (review lastfm__srphp info): the response payload is
+     * bounded BEFORE decode. A compromised or DNS-repointed endpoint that
+     * answers with an oversized body can no longer balloon a resident
+     * worker through json_decode; the body is treated as unparseable, which
+     * keeps the honest failure shape (no fabricated envelope code — the 29
+     * inside the giant body must NOT surface, that is the decode-refusal
+     * proof) and logs one warning naming the ceiling.
+     */
+    public function testOversizedResponseBodyIsRefusedBeforeDecode(): void
+    {
+        $giant = '{"error":29,"message":"' . str_repeat('a', LastfmApi::MAX_RESPONSE_BYTES) . '"}';
+        $this->assertGreaterThan(LastfmApi::MAX_RESPONSE_BYTES, strlen($giant));
+
+        /** @var array<int, array{message: string, context: array<string, mixed>}> $warnings */
+        $warnings = [];
+        $logger = new class ($warnings) extends NullLogger {
+            /** @var array<int, array{message: string, context: array<string, mixed>}> */
+            private array $warningsRef;
+
+            public function __construct(array &$warningsRef)
+            {
+                $this->warningsRef = &$warningsRef;
+            }
+
+            public function warning($message, array $context = []): void
+            {
+                $this->warningsRef[] = ['message' => $message, 'context' => $context];
+            }
+        };
+
+        $http = static function () use ($giant): array {
+            return ['status' => 200, 'body' => $giant];
+        };
+
+        $api = new LastfmApi('K', 'S', $logger, $http, 0.0);
+        $outcome = $api->updateNowPlaying('SK', 'T', 'A');
+
+        $this->assertFalse($outcome->success);
+        $this->assertNull($outcome->errorCode, 'a refused body must never be decoded into an envelope verdict');
+        $this->assertFalse($outcome->transient, 'a body the client refuses to read is not a retryable hiccup');
+
+        $messages = array_column($warnings, 'message');
+        $this->assertContains('Last.fm API response exceeded the decode size ceiling', $messages);
+        $ceiling = array_values(array_filter(
+            $warnings,
+            static fn (array $w): bool => $w['message'] === 'Last.fm API response exceeded the decode size ceiling',
+        ));
+        $this->assertSame(LastfmApi::MAX_RESPONSE_BYTES, $ceiling[0]['context']['max_bytes']);
+        $this->assertSame(strlen($giant), $ceiling[0]['context']['bytes']);
+    }
+
+    /**
+     * The ceiling boundary: a body of exactly MAX_RESPONSE_BYTES is honest
+     * traffic (rate-limit envelope, code 29 → transient) and must still
+     * decode — the cap refuses oversized payloads, not large-but-legal ones.
+     */
+    public function testBodyAtExactlyTheCeilingStillDecodes(): void
+    {
+        $prefix = '{"error":29,"message":"';
+        $pad = LastfmApi::MAX_RESPONSE_BYTES - strlen($prefix) - 2;
+        $body = $prefix . str_repeat('b', $pad) . '"}';
+        $this->assertSame(LastfmApi::MAX_RESPONSE_BYTES, strlen($body));
+
+        $http = static function () use ($body): array {
+            return ['status' => 200, 'body' => $body];
+        };
+
+        $api = new LastfmApi('K', 'S', null, $http, 0.0);
+        $outcome = $api->updateNowPlaying('SK', 'T', 'A');
+
+        $this->assertFalse($outcome->success);
+        $this->assertSame(29, $outcome->errorCode);
+        $this->assertTrue($outcome->transient);
+    }
 }

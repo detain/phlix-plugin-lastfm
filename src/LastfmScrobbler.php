@@ -31,6 +31,19 @@ use Psr\Log\NullLogger;
  *
  * Only when both gates pass is {@see LastfmApi::scrobble()} invoked.
  *
+ * "Listened" is MEASURED, not assumed: the initial `positionTicks` each
+ * `phlix.playback.started` carries is remembered per (sessionId,
+ * mediaItemId) and subtracted from the stop event's final position, so a
+ * session resumed at 75 % is charged the quarter it actually played. Two
+ * approximations remain, both deliberate: within one remembered session a
+ * scrub forward still counts as listening (the event contract carries no
+ * progress stream to do better), and a stop whose start this process never
+ * saw (worker restart, plugin enabled mid-track) measures from position
+ * zero. `reachedEnd` is deliberately NOT consulted: it states the host's
+ * item-consumption verdict (>= 90 % across history), not this session's
+ * listening time — passing on it would re-admit exactly the
+ * resume-then-finish false scrobble the rule exists to refuse.
+ *
  * @package Phlix\Plugins\Scrobbler\Lastfm
  * @since 1.1.0
  */
@@ -42,8 +55,24 @@ class LastfmScrobbler
     /** Minimum fraction of the track that must be played. */
     public const MIN_PLAYED_FRACTION = 0.5;
 
-    /** Conversion factor: 100-ns ticks → seconds. */
-    private const TICKS_PER_SECOND = 10_000_000;
+    /**
+     * Ceiling of the in-process start-offset cache. Abandoned pairs (started,
+     * never stopped) are evicted FIFO past the ceiling — a resident worker's
+     * map stays bounded at a few tens of kilobytes.
+     */
+    public const MAX_START_CACHE = 256;
+
+    /**
+     * Where each playback session STARTED, keyed `sessionId|mediaItemId`,
+     * valued the initial `positionTicks` of {@see PlaybackStarted}.
+     * Process-local by design (a restart loses it → the documented zero
+     * fallback). A repeat {@see PlaybackStopped} for the same pair keeps
+     * measuring from it — the host can end a session more than once
+     * (markAsWatched, a later clearProgress) — and a new start overwrites.
+     *
+     * @var array<string, int>
+     */
+    private array $startPositions = [];
 
     /**
      * Bound of the in-process transient scrobble retry queue. Overflow
@@ -170,6 +199,9 @@ class LastfmScrobbler
 
     private function handlePlaybackStarted(PlaybackStarted $event): void
     {
+        // Recorded BEFORE any gate: the offset matters at stop time even for
+        // a user who connects Last.fm (or resolves metadata) only later.
+        $this->recordStartOffset($event);
         $this->ensureSchema();
         $session = $this->sessions->findByUserId($event->userId);
         if ($session === null) {
@@ -206,6 +238,22 @@ class LastfmScrobbler
     }
 
     /**
+     * Remember where a session started (see {@see self::$startPositions}).
+     *
+     * A negative client offset is clamped at the source: subtracting a
+     * negative would inflate the watched time measured at stop.
+     */
+    private function recordStartOffset(PlaybackStarted $event): void
+    {
+        $key = $event->sessionId . '|' . $event->mediaItemId;
+        $this->startPositions[$key] = max(0, $event->positionTicks);
+
+        while (count($this->startPositions) > self::MAX_START_CACHE) {
+            array_shift($this->startPositions);
+        }
+    }
+
+    /**
      * Handle `phlix.playback.stopped` — scrobbles when Last.fm's official
      * `>30s AND >50%` rule is satisfied.
      *
@@ -229,8 +277,10 @@ class LastfmScrobbler
      * Log one containment warning for a failed playback hook.
      *
      * Context carries only exception class/message + user UUID (the
-     * session key is request-side state and is deliberately absent;
-     * DB exception messages contain no credentials).
+     * session key is request-side state and is deliberately absent; the
+     * message is bounded at the boundary — {@see LogSafety::boundedMessage}
+     * — because the host connection's emulated prepares can re-materialize
+     * bound values into SQL exception text).
      */
     private function logHookFailure(string $hook, string $userId, \Throwable $t): void
     {
@@ -238,7 +288,7 @@ class LastfmScrobbler
             'hook'      => $hook,
             'user_id'   => $userId,
             'exception' => get_class($t),
-            'error'     => $t->getMessage(),
+            'error'     => LogSafety::boundedMessage($t),
         ]);
     }
 
@@ -265,7 +315,11 @@ class LastfmScrobbler
         }
 
         $duration = is_int($track['duration_seconds'] ?? null) ? $track['duration_seconds'] : null;
-        $playedSeconds = (int) ($event->finalPositionTicks / self::TICKS_PER_SECOND);
+        // Watched time, not playhead position: subtract where this session
+        // started. An unknown start (never recorded here) is the documented
+        // zero-offset fallback.
+        $startTicks = $this->startPositions[$event->sessionId . '|' . $event->mediaItemId] ?? 0;
+        $playedSeconds = PlaybackTicks::toSeconds(max(0, $event->finalPositionTicks - $startTicks));
 
         if (!$this->meetsScrobbleRules($duration, $playedSeconds)) {
             $this->logger->debug('Last.fm scrobble skipped: rule not satisfied', [
@@ -278,6 +332,8 @@ class LastfmScrobbler
             return;
         }
 
+        // Last.fm wants the listen-start moment: anchor it to the watched
+        // seconds, not to the playhead position.
         $startedAt = time() - $playedSeconds;
         $outcome = $this->api->scrobble(
             $session['session_key'],
@@ -437,7 +493,7 @@ class LastfmScrobbler
             $this->logger->warning('Last.fm invalid-session cleanup failed', [
                 'user_id'   => $userId,
                 'exception' => get_class($t),
-                'error'     => $t->getMessage(),
+                'error'     => LogSafety::boundedMessage($t),
             ]);
         }
     }

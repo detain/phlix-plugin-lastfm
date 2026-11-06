@@ -189,7 +189,9 @@ final class LastfmPlugin implements LifecycleInterface, ConfigurableInterface
         try {
             $sessions = $container->get(LastfmSessionRepository::class);
         } catch (\Throwable $e) {
-            $this->logger->debug('Last.fm: container lookup for sessions failed', ['error' => $e->getMessage()]);
+            $this->logger->debug('Last.fm: container lookup for sessions failed', [
+                'error' => LogSafety::boundedMessage($e),
+            ]);
             return null;
         }
         return $sessions instanceof LastfmSessionRepository ? $sessions : null;
@@ -226,7 +228,9 @@ final class LastfmPlugin implements LifecycleInterface, ConfigurableInterface
                 $runner->run();
                 $logger->debug('Last.fm migrations completed (deferred, first-use)');
             } catch (\Throwable $e) {
-                $logger->warning('Last.fm migration runner threw', ['error' => $e->getMessage()]);
+                $logger->warning('Last.fm migration runner threw', [
+                    'error' => LogSafety::boundedMessage($e),
+                ]);
             }
         };
     }
@@ -269,7 +273,7 @@ final class LastfmPlugin implements LifecycleInterface, ConfigurableInterface
                 'title'            => $title,
                 'artist'           => $artist,
                 'album'            => $album,
-                'duration_seconds' => $durationTicks > 0 ? (int) ($durationTicks / 10_000_000) : null,
+                'duration_seconds' => $durationTicks > 0 ? PlaybackTicks::toSeconds($durationTicks) : null,
             ];
         };
     }
@@ -281,12 +285,15 @@ final class LastfmPlugin implements LifecycleInterface, ConfigurableInterface
      * Build an async HTTP runner backed by workerman/http-client.
      *
      * This runner integrates with the Workerman event loop instead of
-     * blocking the worker on each scrobble/now-playing HTTP POST.
-     * TLS verification is kept ON (default).
+     * blocking the worker on each scrobble/now-playing HTTP POST. TLS
+     * verification is EXPLICITLY strict — {@see self::asyncClientOptions()}
+     * replaces the vendor's insecure default context; see the reasoning
+     * pinned there and in the tests.
      *
      * If workerman/http-client is not available, falls back to a sync
      * runner that wraps the stream-based default — callers will still
-     * receive correct results but the worker will block on I/O.
+     * receive correct results but the worker will block on I/O. The stream
+     * fallback verifies TLS through PHP's own stream defaults.
      *
      * @return callable(string $url, string $body, array<string, string> $headers): array{status: int, body: string, headers: array<array-key, mixed>}
      */
@@ -297,13 +304,8 @@ final class LastfmPlugin implements LifecycleInterface, ConfigurableInterface
             return LastfmApi::defaultHttp();
         }
 
-        // 3-second connect timeout, 10-second transfer timeout — keeps things snappy.
-        // TLS verification is ON by default (do not disable peer/host verification).
         /** @var \Workerman\Http\Client $client */
-        $client = new \Workerman\Http\Client([
-            'timeout'         => 10,
-            'connect_timeout' => 3,
-        ]);
+        $client = new \Workerman\Http\Client(self::asyncClientOptions());
 
         // The cooperative rendezvous only parks safely inside a coroutine:
         // outside one, the channel pop blocks the whole worker instead of
@@ -315,6 +317,44 @@ final class LastfmPlugin implements LifecycleInterface, ConfigurableInterface
             static fn (): bool => self::cooperativeContextAvailable(),
             $this->logger,
         );
+    }
+
+    /**
+     * The options handed to the {@see \Workerman\Http\Client} constructor —
+     * the ONLY place this package configures that client.
+     *
+     * The strict `context.ssl` subtree is load-bearing. The pinned vendor
+     * (workerman/http-client v3.1.3) builds its DEFAULT context as
+     * `verify_peer=false, verify_peer_name=false, allow_self_signed=true`
+     * (ConnectionPool::create()), and it merges `options['context']` on top
+     * with a plain `array_merge` — which REPLACES the whole `ssl` subtree
+     * rather than patching keys into it. So every setting that must hold has
+     * to be stated here, `peer_name` included (the hostname the vendor would
+     * auto-extract dies with the discarded default subtree). Without this
+     * the production path POSTs `api_key`, the long-lived per-user `sk` and
+     * `api_sig` over a connection any self-signed certificate can
+     * terminate — a network-position attacker harvests Last.fm credentials
+     * at will.
+     *
+     * @return array{timeout: int, connect_timeout: int, context: array{ssl: array{verify_peer: bool, verify_peer_name: bool, allow_self_signed: bool, peer_name: string}}}
+     */
+    public static function asyncClientOptions(): array
+    {
+        return [
+            // 3-second connect timeout, 10-second transfer timeout — keeps things snappy.
+            'timeout'         => 10,
+            'connect_timeout' => 3,
+            'context'         => [
+                'ssl' => [
+                    'verify_peer'       => true,
+                    'verify_peer_name'  => true,
+                    'allow_self_signed' => false,
+                    // Same source of truth as the dialed endpoint, so the
+                    // verified identity can never drift from the URL.
+                    'peer_name'         => LastfmApi::API_HOST,
+                ],
+            ],
+        ];
     }
 
     /**

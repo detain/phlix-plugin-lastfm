@@ -16,6 +16,7 @@ use Phlix\Plugins\Scrobbler\Lastfm\LastfmApi;
 use Phlix\Plugins\Scrobbler\Lastfm\LastfmOutcome;
 use Phlix\Plugins\Scrobbler\Lastfm\LastfmScrobbler;
 use Phlix\Plugins\Scrobbler\Lastfm\LastfmSessionRepository;
+use Phlix\Plugins\Scrobbler\Lastfm\PlaybackTicks;
 use Phlix\Shared\Events\Playback\PlaybackStarted;
 use Phlix\Shared\Events\Playback\PlaybackStopped;
 
@@ -76,7 +77,7 @@ final class LastfmScrobblerEdgeCasesTest extends TestCase
         $scrobbler = $this->buildScrobbler(static fn (string $_id) => null);
 
         $scrobbler->onPlaybackStopped(
-            new PlaybackStopped('s', 'u1', 'm', 'd', 100_000_000, true)
+            new PlaybackStopped('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(10), true)
         );
     }
 
@@ -122,14 +123,16 @@ final class LastfmScrobblerEdgeCasesTest extends TestCase
     }
 
     /**
-     * Test that scrobble timestamp is calculated correctly as (current time - played seconds).
-     * This verifies the scrobble timestamp calculation in onPlaybackStopped.
+     * The scrobble timestamp marks when LISTENING happened, measured from the
+     * cached start offset (60s), not from zero: a stop at 170s watched 110s,
+     * so the submitted timestamp sits at (now - 110).
      */
-    public function testScrobbleTimestampIsCalculatedCorrectly(): void
+    public function testScrobbleTimestampSubtractsTheStartOffset(): void
     {
         $this->sessions->method('findByUserId')->willReturn([
             'user_id' => 'u1', 'session_key' => 'SK', 'connected_at' => '2024-01-01 00:00:00',
         ]);
+        $this->api->method('updateNowPlaying')->willReturn(LastfmOutcome::success());
 
         $capturedTimestamp = null;
         $this->api->expects(self::once())
@@ -139,21 +142,193 @@ final class LastfmScrobblerEdgeCasesTest extends TestCase
                 return LastfmOutcome::success();
             });
 
-        $playedSeconds = 120;
         $scrobbler = $this->buildScrobbler(static fn (string $_id) => [
             'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
         ]);
 
         $beforeTime = time();
-        $event = new PlaybackStopped('s', 'u1', 'm', 'd', $playedSeconds * 10_000_000, true);
-        $scrobbler->onPlaybackStopped($event);
+        $scrobbler->onPlaybackStarted(new PlaybackStarted('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(60)));
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(170), false));
         $afterTime = time();
 
-        // Timestamp should be approximately (time() - 120)
-        $expectedMin = $beforeTime - $playedSeconds;
-        $expectedMax = $afterTime - $playedSeconds;
-        $this->assertGreaterThanOrEqual($expectedMin, $capturedTimestamp);
-        $this->assertLessThanOrEqual($expectedMax, $capturedTimestamp);
+        $watchedSeconds = 110;
+        $this->assertGreaterThanOrEqual($beforeTime - $watchedSeconds, $capturedTimestamp);
+        $this->assertLessThanOrEqual($afterTime - $watchedSeconds, $capturedTimestamp);
+    }
+
+    /**
+     * The false-positive the start-offset cure kills: a session resumed at
+     * 75 % of a 200s track and stopped at the end advanced the playhead past
+     * the half-way line after only 50 seconds of listening. The old proxy
+     * scrobbled; the remembered offset must refuse.
+     */
+    public function testResumedSessionIsMeasuredByWatchedTimeNotPlayhead(): void
+    {
+        $this->sessions->method('findByUserId')->willReturn([
+            'user_id' => 'u1', 'session_key' => 'SK', 'connected_at' => '2024-01-01 00:00:00',
+        ]);
+        $this->api->expects(self::never())->method('scrobble');
+
+        $scrobbler = $this->buildScrobbler(static fn (string $_id) => [
+            'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
+        ]);
+
+        $scrobbler->onPlaybackStarted(new PlaybackStarted('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(150)));
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(200), true));
+    }
+
+    /**
+     * reachedEnd is deliberately NOT consulted: it states the host's
+     * item-consumment verdict (>= 90 % watched across history), not this
+     * session's listening time — treating it as a pass would re-admit the
+     * resume-then-finish false scrobble above. Pinned by refusal despite
+     * the flag being true.
+     */
+    public function testReachedEndDoesNotExemptTheWatchedTimeRule(): void
+    {
+        $this->sessions->method('findByUserId')->willReturn([
+            'user_id' => 'u1', 'session_key' => 'SK', 'connected_at' => '2024-01-01 00:00:00',
+        ]);
+        $this->api->expects(self::never())->method('scrobble');
+
+        $scrobbler = $this->buildScrobbler(static fn (string $_id) => [
+            'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
+        ]);
+
+        $scrobbler->onPlaybackStarted(new PlaybackStarted('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(190)));
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(200), true));
+    }
+
+    /**
+     * A stop event whose start the process never saw (worker restart, plugin
+     * enabled mid-track) falls back to measuring from position zero — the
+     * documented degradation, pinned so the fallback itself stays honest.
+     */
+    public function testStopWithoutStartFallsBackToZeroOffset(): void
+    {
+        $this->sessions->method('findByUserId')->willReturn([
+            'user_id' => 'u1', 'session_key' => 'SK', 'connected_at' => '2024-01-01 00:00:00',
+        ]);
+        $this->api->expects(self::once())->method('scrobble')
+            ->willReturn(LastfmOutcome::success());
+
+        $scrobbler = $this->buildScrobbler(static fn (string $_id) => [
+            'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
+        ]);
+
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(101), false));
+    }
+
+    /**
+     * The offset is remembered per (sessionId, mediaItemId) pair: a stop for
+     * a DIFFERENT item must not inherit another item's start position, and
+     * the tracked pair keeps its own (10s watched → refusal).
+     */
+    public function testStartOffsetIsKeyedBySessionAndItem(): void
+    {
+        $this->sessions->method('findByUserId')->willReturn([
+            'user_id' => 'u1', 'session_key' => 'SK', 'connected_at' => '2024-01-01 00:00:00',
+        ]);
+        $this->api->method('updateNowPlaying')->willReturn(LastfmOutcome::success());
+        $this->api->expects(self::exactly(1))->method('scrobble')
+            ->willReturn(LastfmOutcome::success());
+
+        $scrobbler = $this->buildScrobbler(static fn (string $_id) => [
+            'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
+        ]);
+
+        $scrobbler->onPlaybackStarted(new PlaybackStarted('sess-A', 'u1', 'media-X', 'd', PlaybackTicks::fromSeconds(150)));
+        // Item Y was never started here → zero-offset fallback → 101s watched → scrobble.
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('sess-A', 'u1', 'media-Y', 'd', PlaybackTicks::fromSeconds(101), false));
+        // Item X keeps its own offset → 10s watched → refusal.
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('sess-A', 'u1', 'media-X', 'd', PlaybackTicks::fromSeconds(160), false));
+    }
+
+    /**
+     * A second stop for the same pair (the host can fire stopped more than
+     * once per session, e.g. markAsWatched and a later clearProgress) keeps
+     * measuring from the remembered start instead of silently reverting to
+     * the zero fallback — the entry is retained, not consumed.
+     */
+    public function testRepeatedStopsKeepMeasuringFromTheRememberedStart(): void
+    {
+        $this->sessions->method('findByUserId')->willReturn([
+            'user_id' => 'u1', 'session_key' => 'SK', 'connected_at' => '2024-01-01 00:00:00',
+        ]);
+        $this->api->method('updateNowPlaying')->willReturn(LastfmOutcome::success());
+        $this->api->expects(self::never())->method('scrobble');
+
+        $scrobbler = $this->buildScrobbler(static fn (string $_id) => [
+            'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
+        ]);
+
+        $scrobbler->onPlaybackStarted(new PlaybackStarted('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(150)));
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(160), false));
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(200), true));
+
+        $this->assertCount(1, $this->readStartCache($scrobbler), 'the pair stays tracked for repeat stops');
+    }
+
+    /**
+     * A rewound stop (final position before the remembered start — client
+     * quirk or clock weirdness) clamps to zero watched time instead of
+     * producing a negative duration or a bogus back-dated timestamp.
+     */
+    public function testBackwardStopClampsToZeroWatchedTime(): void
+    {
+        $this->sessions->method('findByUserId')->willReturn([
+            'user_id' => 'u1', 'session_key' => 'SK', 'connected_at' => '2024-01-01 00:00:00',
+        ]);
+        $this->api->method('updateNowPlaying')->willReturn(LastfmOutcome::success());
+        $this->api->expects(self::never())->method('scrobble');
+
+        $scrobbler = $this->buildScrobbler(static fn (string $_id) => [
+            'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
+        ]);
+
+        $scrobbler->onPlaybackStarted(new PlaybackStarted('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(100)));
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(40), false));
+    }
+
+    /**
+     * The start cache is bounded: once the ceiling is reached the oldest
+     * remembered pair is evicted (FIFO), so a resident worker cannot grow
+     * the map without limit across abandoned sessions. Pinned behaviorally:
+     * after the eviction the first pair behaves like a stop-without-start
+     * (zero fallback → scrobble) while a still-cached pair keeps its 150s
+     * offset (50s watched → refusal).
+     */
+    public function testStartCacheIsBoundedAndEvictsOldest(): void
+    {
+        $this->sessions->method('findByUserId')->willReturn([
+            'user_id' => 'u1', 'session_key' => 'SK', 'connected_at' => '2024-01-01 00:00:00',
+        ]);
+        $this->api->method('updateNowPlaying')->willReturn(LastfmOutcome::success());
+        $this->api->expects(self::once())->method('scrobble')
+            ->willReturn(LastfmOutcome::success());
+
+        $scrobbler = $this->buildScrobbler(static fn (string $_id) => [
+            'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
+        ]);
+
+        $pairs = LastfmScrobbler::MAX_START_CACHE + 1;
+        for ($i = 0; $i < $pairs; $i++) {
+            $scrobbler->onPlaybackStarted(new PlaybackStarted('sess-' . $i, 'u1', 'm', 'd', PlaybackTicks::fromSeconds(150)));
+        }
+        $this->assertCount(LastfmScrobbler::MAX_START_CACHE, $this->readStartCache($scrobbler));
+
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('sess-0', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(200), true));
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('sess-1', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(200), true));
+    }
+
+    /**
+     * @return array<string, int>
+     */
+    private function readStartCache(LastfmScrobbler $scrobbler): array
+    {
+        /** @var array<string, int> $cache */
+        $cache = (new \ReflectionProperty(LastfmScrobbler::class, 'startPositions'))->getValue($scrobbler);
+        return $cache;
     }
 
     /**
