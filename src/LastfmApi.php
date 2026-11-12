@@ -659,11 +659,11 @@ class LastfmApi
             }
             $attrReason = is_array($ignore['@attr'] ?? null) ? $ignore['@attr']['reason'] ?? null : null;
             if (is_string($attrReason) && $attrReason !== '') {
-                return $attrReason;
+                return LogSafety::scrubbed($attrReason);
             }
             $directReason = $ignore['reason'] ?? null;
             if (is_string($directReason) && $directReason !== '') {
-                return $directReason;
+                return LogSafety::scrubbed($directReason);
             }
         }
         return null;
@@ -700,7 +700,7 @@ class LastfmApi
     private static function envelopeMessage(array $response): ?string
     {
         $raw = $response['message'] ?? null;
-        return is_string($raw) ? $raw : null;
+        return is_string($raw) ? LogSafety::scrubbed($raw) : null;
     }
 
     /**

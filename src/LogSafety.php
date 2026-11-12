@@ -68,4 +68,39 @@ final class LogSafety
 
         return $kept . '... [truncated from ' . strlen($message) . ' bytes]';
     }
+
+    /** Bytes of a response-sourced string kept before the truncation marker. */
+    public const MAX_RESPONSE_STRING_BYTES = 256;
+
+    /**
+     * A response-sourced string (envelope message, ignore reason) made safe
+     * for outcomes and log context: ASCII control characters (incl. CR/LF and
+     * DEL) are replaced with a space, invalid UTF-8 is dropped, and the text
+     * is capped on a character boundary with a truncation marker.
+     *
+     * @throws \InvalidArgumentException when `$maxBytes` is not positive.
+     */
+    public static function scrubbed(string $raw, int $maxBytes = self::MAX_RESPONSE_STRING_BYTES): string
+    {
+        if ($maxBytes <= 0) {
+            throw new \InvalidArgumentException(
+                'A log-message bound must be positive, got ' . $maxBytes . '.',
+            );
+        }
+
+        $clean = preg_replace('/[\x00-\x1F\x7F]/', ' ', $raw) ?? '';
+        if (preg_match('//u', $clean) !== 1) {
+            $clean = mb_convert_encoding($clean, 'UTF-8', 'UTF-8');
+        }
+        if (strlen($clean) <= $maxBytes) {
+            return $clean;
+        }
+
+        $kept = substr($clean, 0, $maxBytes);
+        while ($kept !== '' && preg_match('//u', $kept) !== 1) {
+            $kept = substr($kept, 0, -1);
+        }
+
+        return $kept . '... [truncated from ' . strlen($clean) . ' bytes]';
+    }
 }

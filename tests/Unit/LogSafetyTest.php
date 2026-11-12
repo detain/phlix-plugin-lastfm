@@ -70,4 +70,19 @@ final class LogSafetyTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         LogSafety::boundedMessage(new \RuntimeException('x'), 0);
     }
+
+    public function testScrubbedStripsControlCharsAndCaps(): void
+    {
+        $raw = "bad\r\nINJECTED\x00\x1B[31m\x7F" . str_repeat('x', 1000);
+        $out = LogSafety::scrubbed($raw);
+
+        $this->assertSame(0, preg_match('/[\x00-\x1F\x7F]/', $out));
+        $this->assertStringContainsString('truncated', $out);
+        $this->assertLessThanOrEqual(
+            LogSafety::MAX_RESPONSE_STRING_BYTES + LogSafety::MAX_MARKER_BYTES,
+            strlen($out),
+        );
+        $this->assertSame('short ok', LogSafety::scrubbed('short ok'));
+        $this->assertSame(1, preg_match('//u', LogSafety::scrubbed(str_repeat('あ', 300))));
+    }
 }
