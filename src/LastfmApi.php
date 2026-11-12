@@ -69,9 +69,18 @@ class LastfmApi
 
     /**
      * Last.fm is a courtesy-polite API; hammering it during a transient
-     * outage converts backoff into harder throttling. One client instance
-     * == one API key in this plugin, so a per-instance minimum dispatch
-     * interval is the honest pacing seam.
+     * outage converts backoff into harder throttling, so each client
+     * instance enforces a minimum interval between its own dispatches.
+     *
+     * This is a PER-WORKER FLOOR, not a per-API-key ceiling. Every resident
+     * worker enables its own LastfmPlugin and therefore constructs its own
+     * LastfmApi (see LastfmPlugin::onEnable()), and the dispatch stamp lives
+     * in instance memory — nothing is shared across processes. With N
+     * workers serving the same API key, the aggregate dispatch rate can
+     * reach N times 1/interval. There is deliberately no cross-process
+     * limiter; upstream throttling is absorbed by the transient
+     * classification of {@see self::RATE_LIMIT_ENVELOPE_CODE} and HTTP 429
+     * instead.
      */
     public const DEFAULT_MIN_INTERVAL_SECONDS = 0.2;
 
