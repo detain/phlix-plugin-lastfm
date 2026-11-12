@@ -270,6 +270,29 @@ final class LastfmScrobblerEdgeCasesTest extends TestCase
     }
 
     /**
+     * LFM-2: a repeated stop for the same (session, item) after a successful
+     * scrobble submits nothing; a new start for the pair re-arms it.
+     */
+    public function testRepeatedStopAfterSuccessDoesNotScrobbleTwiceAndNewStartRearms(): void
+    {
+        $this->sessions->method('findByUserId')->willReturn([
+            'user_id' => 'u1', 'session_key' => 'SK', 'connected_at' => '2024-01-01 00:00:00',
+        ]);
+        $this->api->method('updateNowPlaying')->willReturn(LastfmOutcome::success());
+        $this->api->expects(self::exactly(2))->method('scrobble')->willReturn(LastfmOutcome::success());
+
+        $scrobbler = $this->buildScrobbler(static fn (string $_id) => [
+            'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
+        ]);
+
+        $scrobbler->onPlaybackStarted(new PlaybackStarted('s', 'u1', 'm', 'd', 0));
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(150), false));
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(200), true));
+        $scrobbler->onPlaybackStarted(new PlaybackStarted('s', 'u1', 'm', 'd', 0));
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(150), false));
+    }
+
+    /**
      * A rewound stop (final position before the remembered start — client
      * quirk or clock weirdness) clamps to zero watched time instead of
      * producing a negative duration or a bogus back-dated timestamp.

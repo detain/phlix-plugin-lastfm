@@ -75,6 +75,16 @@ class LastfmScrobbler
     private array $startPositions = [];
 
     /**
+     * Pairs (`sessionId|mediaItemId`) whose scrobble already succeeded (or
+     * was handed to the retry queue) — a repeat stop for the same pair must
+     * not submit twice. Cleared by a new {@see PlaybackStarted} for the pair
+     * (a new start is authoritative); bounded like the start cache.
+     *
+     * @var array<string, true>
+     */
+    private array $scrobbledPairs = [];
+
+    /**
      * Bound of the in-process transient scrobble retry queue. Overflow
      * drops the OLDEST pending submission (with a warning) — a bounded
      * memory ceiling beats unbounded growth during a long Last.fm outage.
@@ -251,9 +261,18 @@ class LastfmScrobbler
     {
         $key = $event->sessionId . '|' . $event->mediaItemId;
         $this->startPositions[$key] = max(0, $event->positionTicks);
+        unset($this->scrobbledPairs[$key]);
 
         while (count($this->startPositions) > self::MAX_START_CACHE) {
             array_shift($this->startPositions);
+        }
+    }
+
+    private function markPairScrobbled(string $key): void
+    {
+        $this->scrobbledPairs[$key] = true;
+        while (count($this->scrobbledPairs) > self::MAX_START_CACHE) {
+            array_shift($this->scrobbledPairs);
         }
     }
 
@@ -322,7 +341,14 @@ class LastfmScrobbler
         // Listened time, not playhead position: subtract where this session
         // started. An unknown start (never recorded here) is the documented
         // zero-offset fallback.
-        $startTicks = $this->startPositions[$event->sessionId . '|' . $event->mediaItemId] ?? 0;
+        $pairKey = $event->sessionId . '|' . $event->mediaItemId;
+        if (isset($this->scrobbledPairs[$pairKey])) {
+            $this->logger->debug('Last.fm scrobble skipped: pair already scrobbled', [
+                'media_item_id' => $event->mediaItemId,
+            ]);
+            return;
+        }
+        $startTicks = $this->startPositions[$pairKey] ?? 0;
         $playedSeconds = PlaybackTicks::toSeconds(max(0, $event->finalPositionTicks - $startTicks));
 
         if (!$this->meetsScrobbleRules($duration, $playedSeconds)) {
@@ -349,6 +375,7 @@ class LastfmScrobbler
         // Twin of the now-playing path: failed submissions are logged,
         // never dropped.
         if ($outcome->success) {
+            $this->markPairScrobbled($pairKey);
             return;
         }
         $this->logger->warning('Last.fm scrobble submission failed', $outcome->logContext() + [
@@ -361,6 +388,7 @@ class LastfmScrobbler
         // A transient failure is NOT the end of the story — queue the
         // submission for replay (attempt 1 spent).
         if ($outcome->transient) {
+            $this->markPairScrobbled($pairKey);
             $this->enqueueScrobble([
                 'user_id'     => $event->userId,
                 'session_key' => $session['session_key'],
