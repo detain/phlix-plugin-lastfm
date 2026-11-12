@@ -436,20 +436,46 @@ class LastfmApi
      * Under Swoole coroutine hooks `usleep` yields instead of blocking the
      * worker, and the fallback stream runner is a blocking path anyway — the
      * wait is correct in both. Non-positive intervals disable the gate.
+     *
+     * The wait is clamped by {@see self::paceWaitSeconds()}: `microtime()` is
+     * wall time, so an NTP correction or manual clock step backwards would
+     * otherwise turn `$due - $now` into an hours-long `usleep` that wedges
+     * the resident worker. The stamp taken after the (bounded) wait re-anchors
+     * the gate on the new clock.
      */
     private function pace(): void
     {
         if ($this->minIntervalSeconds <= 0.0) {
             return;
         }
-        $now = microtime(true);
-        if ($this->lastDispatchAt !== null) {
-            $due = $this->lastDispatchAt + $this->minIntervalSeconds;
-            if ($now < $due) {
-                usleep((int) round(($due - $now) * 1_000_000));
-            }
+        $wait = self::paceWaitSeconds($this->lastDispatchAt, microtime(true), $this->minIntervalSeconds);
+        if ($wait > 0.0) {
+            usleep((int) round($wait * 1_000_000));
         }
         $this->lastDispatchAt = microtime(true);
+    }
+
+    /**
+     * Seconds {@see self::pace()} must wait before the next dispatch, always
+     * within `[0, $minIntervalSeconds]`.
+     *
+     * - First dispatch (no previous stamp) or a due time already passed: 0.
+     * - Normal pacing window: `$due - $now`, which is at most the interval.
+     * - Clock stepped backwards (`$now` earlier than the previous stamp, so
+     *   `$due - $now` exceeds the interval or is not finite): treated as a
+     *   reset — the previous dispatch is taken to have happened at `$now`, so
+     *   the wait is exactly one interval, never the size of the clock step.
+     */
+    private static function paceWaitSeconds(?float $lastDispatchAt, float $now, float $minIntervalSeconds): float
+    {
+        if ($lastDispatchAt === null || $minIntervalSeconds <= 0.0) {
+            return 0.0;
+        }
+        $wait = ($lastDispatchAt + $minIntervalSeconds) - $now;
+        if (!is_finite($wait) || $wait > $minIntervalSeconds) {
+            return $minIntervalSeconds;
+        }
+        return $wait > 0.0 ? $wait : 0.0;
     }
 
     /**

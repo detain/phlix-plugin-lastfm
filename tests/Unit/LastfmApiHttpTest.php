@@ -407,6 +407,66 @@ final class LastfmApiHttpTest extends TestCase
     }
 
     /**
+     * LFM-3: a backward wall-clock step (NTP correction, manual set) must not
+     * turn the pacing gate into an hours-long usleep. Simulate the step by
+     * planting the previous dispatch stamp one hour in the future: the
+     * dispatch must still go out within roughly one pacing interval, and the
+     * stamp must be re-anchored on the current clock.
+     */
+    public function testBackwardClockStepWaitsAtMostOneInterval(): void
+    {
+        $calls = 0;
+        $http = static function () use (&$calls): array {
+            $calls++;
+            return ['status' => 200, 'body' => '{"ok":1}'];
+        };
+
+        $api = new LastfmApi('K', 'S', null, $http, 0.05);
+        $stamp = new \ReflectionProperty(LastfmApi::class, 'lastDispatchAt');
+        $stamp->setValue($api, microtime(true) + 3600.0);
+
+        $start = microtime(true);
+        $api->updateNowPlaying('SK', 'T1', 'A');
+        $elapsed = microtime(true) - $start;
+
+        $this->assertSame(1, $calls);
+        $this->assertGreaterThanOrEqual(0.045, $elapsed, 'a clock step is treated as a reset: one full interval');
+        $this->assertLessThan(1.0, $elapsed, 'wait must be clamped to the interval, not the clock step');
+        $this->assertLessThanOrEqual(microtime(true), $stamp->getValue($api), 'stamp re-anchored on the current clock');
+    }
+
+    /**
+     * LFM-3: pin the clamp arithmetic of the pure wait helper — the result is
+     * always within [0, interval] whatever the clock did.
+     *
+     * @return iterable<string, array{0: ?float, 1: float, 2: float, 3: float}>
+     */
+    public static function paceWaitCases(): iterable
+    {
+        yield 'first dispatch'            => [null, 1000.0, 0.2, 0.0];
+        yield 'pacing disabled'           => [1000.0, 1000.0, 0.0, 0.0];
+        yield 'due already passed'        => [1000.0, 1001.0, 0.2, 0.0];
+        yield 'exactly due'               => [1000.0, 1000.2, 0.2, 0.0];
+        yield 'inside the window'         => [1000.0, 1000.05, 0.2, 0.15];
+        yield 'same instant'              => [1000.0, 1000.0, 0.2, 0.2];
+        yield 'clock stepped back 1h'     => [1000.0, -2600.0, 0.2, 0.2];
+        yield 'clock stepped back a hair' => [1000.0, 999.99, 0.2, 0.2];
+        yield 'non-finite stamp'          => [INF, 1000.0, 0.2, 0.2];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('paceWaitCases')]
+    public function testPaceWaitIsClampedToTheInterval(?float $last, float $now, float $interval, float $expected): void
+    {
+        $method = new \ReflectionMethod(LastfmApi::class, 'paceWaitSeconds');
+        $wait = $method->invoke(null, $last, $now, $interval);
+
+        $this->assertIsFloat($wait);
+        $this->assertEqualsWithDelta($expected, $wait, 1e-9);
+        $this->assertGreaterThanOrEqual(0.0, $wait);
+        $this->assertLessThanOrEqual(max($interval, 0.0), $wait);
+    }
+
+    /**
      * PG-149 twin (review lastfm__srphp info): the response payload is
      * bounded BEFORE decode. A compromised or DNS-repointed endpoint that
      * answers with an oversized body can no longer balloon a resident
