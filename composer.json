@@ -1,7 +1,7 @@
 {
     "name": "detain/phlix-plugin-lastfm",
     "type": "phlix-plugin",
-    "description": "Last.fm scrobbler plugin for Phlix — scrobbles music playback to Last.fm.",
+    "description": "Last.fm scrobbler plugin for Phlix — scrobbles what you play to Last.fm.",
     "license": "MIT",
     "keywords": ["phlix", "phlix-plugin", "scrobbler", "lastfm", "scrobbling", "music"],
     "homepage": "https://github.com/detain/phlix-plugin-lastfm",

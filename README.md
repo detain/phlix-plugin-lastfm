@@ -3,7 +3,7 @@
 [![tests](https://github.com/detain/phlix-plugin-lastfm/actions/workflows/test.yml/badge.svg)](https://github.com/detain/phlix-plugin-lastfm/actions/workflows/test.yml)
 
 > Last.fm scrobbler plugin for [Phlix](https://github.com/detain/phlix-server) —
-> scrobbles your music playback to [Last.fm](https://www.last.fm).
+> scrobbles what you play to [Last.fm](https://www.last.fm).
 
 ## Overview
 

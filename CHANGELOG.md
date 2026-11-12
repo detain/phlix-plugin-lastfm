@@ -8,6 +8,7 @@ from git tags; the `1.2.0` tag landed on 2026-11-02.
 
 ### Fixed
 
+- Throwing HTTP runner: an injected runner that throws now degrades at LastfmApi::dispatch() to the status-0 transport shape (transient, queued for retry) with one bounded warning, instead of escaping to the playback-hook containment and losing the scrobble.
 - Blocking stream fallback TLS: the `LastfmApi::defaultHttp()` runner now
   states `verify_peer`, `verify_peer_name` and `allow_self_signed=false`
   explicitly in its stream context (new `defaultHttpContextOptions()`),
