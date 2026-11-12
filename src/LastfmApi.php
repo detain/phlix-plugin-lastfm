@@ -684,6 +684,45 @@ class LastfmApi
     }
 
     /**
+     * The stream-context options the blocking {@see defaultHttp()} runner
+     * dials with — the ONLY place this package configures that context.
+     *
+     * The `ssl` subtree states the TLS policy explicitly instead of leaning
+     * on PHP's stream defaults (which happen to be safe today), and states
+     * the SAME three verification flags as the async client's strict subtree
+     * ({@see LastfmPlugin::asyncClientOptions()}): `verify_peer=true`,
+     * `verify_peer_name=true`, `allow_self_signed=false`. A future php.ini or
+     * default-context change can therefore never quietly downgrade the
+     * fallback that carries `api_key`, `sk` and `api_sig`. `peer_name` is
+     * deliberately NOT pinned here: unlike the vendor's async pool, the
+     * stream wrapper derives it from the dialed URL's host itself, so the
+     * verified identity already tracks the endpoint. Under PHP's safe
+     * defaults this is no behavior change.
+     *
+     * @return array{http: array{method: string, header: string, content: string, timeout: int, ignore_errors: bool}, ssl: array{verify_peer: bool, verify_peer_name: bool, allow_self_signed: bool}}
+     */
+    public static function defaultHttpContextOptions(string $headerLines, string $body): array
+    {
+        return [
+            'http' => [
+                'method'        => 'POST',
+                'header'        => $headerLines,
+                'content'       => $body,
+                'timeout'       => 10,
+                // Without this the wrapper treats >= 400 as a failed
+                // READ (false, empty body): the 403 carrying envelope 29
+                // would lose its transient verdict to the classifier.
+                'ignore_errors' => true,
+            ],
+            'ssl' => [
+                'verify_peer'       => true,
+                'verify_peer_name'  => true,
+                'allow_self_signed' => false,
+            ],
+        ];
+    }
+
+    /**
      * Default HTTP runner using PHP streams. Tests can override via the
      * constructor's `$http` parameter.
      *
@@ -711,18 +750,7 @@ class LastfmApi
             foreach ($headers as $name => $value) {
                 $headerLines .= $name . ': ' . $value . "\r\n";
             }
-            $context = stream_context_create([
-                'http' => [
-                    'method'        => 'POST',
-                    'header'        => $headerLines,
-                    'content'       => $body,
-                    'timeout'       => 10,
-                    // Without this the wrapper treats >= 400 as a failed
-                    // READ (false, empty body): the 403 carrying envelope 29
-                    // would lose its transient verdict to the classifier.
-                    'ignore_errors' => true,
-                ],
-            ]);
+            $context = stream_context_create(self::defaultHttpContextOptions($headerLines, $body));
             $response = @file_get_contents($url, false, $context);
             $statusLine = isset($http_response_header[0])
                 ? (string) $http_response_header[0]

@@ -13,6 +13,7 @@ namespace Phlix\Tests\Unit\Plugins\Scrobbler\Lastfm;
 
 use PHPUnit\Framework\TestCase;
 use Phlix\Plugins\Scrobbler\Lastfm\LastfmApi;
+use Phlix\Plugins\Scrobbler\Lastfm\LastfmPlugin;
 
 /**
  * Tests for the default HTTP runner in {@see LastfmApi}.
@@ -69,6 +70,41 @@ final class LastfmApiDefaultHttpTest extends TestCase
 
         // The closure should be static (doesn't capture $this)
         $this->assertTrue($reflection->isStatic());
+    }
+
+    /**
+     * Context-shape pin: the blocking fallback states its TLS policy
+     * explicitly — verify_peer/verify_peer_name on, self-signed refused —
+     * rather than inheriting whatever the stream defaults happen to be, and
+     * the HTTP leg keeps the transport settings the runner depends on.
+     */
+    public function testDefaultHttpContextStatesStrictTlsFlags(): void
+    {
+        $options = LastfmApi::defaultHttpContextOptions("X-Test: 1\r\n", 'body=x');
+
+        $this->assertSame(
+            ['verify_peer' => true, 'verify_peer_name' => true, 'allow_self_signed' => false],
+            $options['ssl'],
+        );
+        $this->assertSame('POST', $options['http']['method']);
+        $this->assertSame("X-Test: 1\r\n", $options['http']['header']);
+        $this->assertSame('body=x', $options['http']['content']);
+        $this->assertSame(10, $options['http']['timeout']);
+        $this->assertTrue($options['http']['ignore_errors']);
+    }
+
+    /**
+     * Parity pin: the blocking fallback and the async client carry the same
+     * three TLS verification flags, so neither transport can drift weaker
+     * than the other. (`peer_name` is async-only: the vendor pool loses its
+     * auto-extracted host, while the stream wrapper derives it from the URL.)
+     */
+    public function testDefaultHttpTlsFlagsMatchAsyncStrictSubtree(): void
+    {
+        $asyncSsl = LastfmPlugin::asyncClientOptions()['context']['ssl'];
+        unset($asyncSsl['peer_name']);
+
+        $this->assertSame($asyncSsl, LastfmApi::defaultHttpContextOptions('', '')['ssl']);
     }
 
     /**

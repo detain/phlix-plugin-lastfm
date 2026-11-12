@@ -8,6 +8,11 @@ from git tags; the `1.2.0` tag landed on 2026-11-02.
 
 ### Fixed
 
+- Blocking stream fallback TLS: the `LastfmApi::defaultHttp()` runner now
+  states `verify_peer`, `verify_peer_name` and `allow_self_signed=false`
+  explicitly in its stream context (new `defaultHttpContextOptions()`),
+  matching the async client's strict `ssl` subtree instead of relying on
+  PHP's stream defaults. No behaviour change under PHP's safe defaults.
 - Retry-After ceiling: a server `Retry-After` hint above
   `LastfmApi::MAX_RETRY_AFTER_SECONDS` (3600s) is no longer honoured when a
   transient scrobble failure is queued or re-queued — the job falls back to
