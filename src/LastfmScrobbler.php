@@ -440,7 +440,7 @@ class LastfmScrobbler
                 'attempts' => $job['attempts'],
             ]);
             if ($outcome->isInvalidSession()) {
-                $this->purgeSessionIfInvalid($outcome, $job['user_id']);
+                $this->purgeSessionIfInvalid($outcome, $job['user_id'], $job['session_key']);
                 continue;
             }
             if ($outcome->transient && $job['attempts'] < self::MAX_SCROBBLE_ATTEMPTS) {
@@ -501,13 +501,33 @@ class LastfmScrobbler
      * the normal OAuth flow. Cleanup failure is contained locally with its
      * own warning — it must never replace the diagnostic that already
      * fired, and never throws into the `Throwable` boundary.
+     *
+     * Replay-path guard: a queued job carries a session-key SNAPSHOT taken
+     * at enqueue time. If the user reconnected since, the stored key was
+     * rotated and the stale snapshot's rejection says nothing about the
+     * fresh credential, so when `$staleSnapshotKey` differs from the stored
+     * key the purge is skipped.
+     *
+     * Trust note (LFM-13): the invalid-session verdict is trusted as
+     * delivered by the API client, i.e. it depends on the TLS identity of
+     * the Last.fm endpoint being verified by the transport (strict peer
+     * verification). A spoofed endpoint could force a purge; the cost is a
+     * reconnect, and no logic here compensates for it.
+     *
+     * @param string|null $staleSnapshotKey Session key the failing call used, when it may be older than the stored one (retry drain); null for live calls.
      */
-    private function purgeSessionIfInvalid(LastfmOutcome $outcome, string $userId): void
+    private function purgeSessionIfInvalid(LastfmOutcome $outcome, string $userId, ?string $staleSnapshotKey = null): void
     {
         if (!$outcome->isInvalidSession()) {
             return;
         }
         try {
+            if ($staleSnapshotKey !== null) {
+                $stored = $this->sessions->findByUserId($userId);
+                if ($stored !== null && $stored['session_key'] !== $staleSnapshotKey) {
+                    return;
+                }
+            }
             $this->sessions->delete($userId);
             $this->dropQueuedForUser($userId);
             $this->logger->warning('Last.fm session cleared — the API rejected the stored session key; reconnect required', [

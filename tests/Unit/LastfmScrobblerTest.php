@@ -643,6 +643,44 @@ final class LastfmScrobblerTest extends TestCase
         $this->assertSame('u2', $queue[0]['user_id'], 'other users keep their queues');
     }
 
+    /** LFM-1: a stale queued snapshot key (user reconnected) must NOT purge the fresh session. */
+    public function testStaleSnapshotRejectionDoesNotPurgeRotatedSession(): void
+    {
+        $this->sessions->method('findByUserId')->willReturn([
+            'user_id' => 'u1', 'session_key' => 'SK-NEW', 'connected_at' => '2024-01-01 00:00:00',
+        ]);
+        $this->sessions->expects(self::never())->method('delete');
+        $this->api->method('scrobble')->willReturnCallback(
+            static fn (string $key) => $key === 'SK'
+                ? LastfmOutcome::failure(9, 'Invalid session key', false, null)
+                : LastfmOutcome::success(),
+        );
+        $scrobbler = $this->buildScrobbler(static fn (string $_id) => [
+            'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
+        ]);
+        $this->seedQueue($scrobbler, [$this->queuedJob('Queued-1')]);
+
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(101), true));
+
+        $this->assertCount(0, $this->readQueue($scrobbler));
+    }
+
+    /** LFM-1: snapshot key equal to the stored key still purges (dead credential). */
+    public function testMatchingSnapshotRejectionStillPurges(): void
+    {
+        $this->sessions->method('findByUserId')->willReturn([
+            'user_id' => 'u1', 'session_key' => 'SK', 'connected_at' => '2024-01-01 00:00:00',
+        ]);
+        $this->sessions->expects(self::atLeastOnce())->method('delete')->with('u1');
+        $this->api->method('scrobble')->willReturn(LastfmOutcome::failure(9, 'Invalid session key', false, null));
+        $scrobbler = $this->buildScrobbler(static fn (string $_id) => [
+            'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
+        ]);
+        $this->seedQueue($scrobbler, [$this->queuedJob('Queued-1')]);
+
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(101), true));
+    }
+
     /**
      * PG-150 twin (review lastfm__secaudit info): the host connection class
      * re-materializes bound values into exception text (emulated prepares),
