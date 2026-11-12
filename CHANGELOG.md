@@ -4,6 +4,18 @@ All notable changes to this plugin are documented here. The format follows
 Keep a Changelog; versions follow SemVer. Catalog release entries are built
 from git tags; the `1.2.0` tag landed on 2026-11-02.
 
+## [Unreleased]
+
+### Fixed
+
+- Docs: the `enabled` setting row in the README no longer calls `'false'` a
+  "junk string". `'false'`, `'0'`, `'off'`, `'no'` and `''` are the canonical
+  false strings — they disable the plugin by design, the same as `false`.
+  Only values outside the canonical set (e.g. `'banana'`, `null`, arrays)
+  are junk, and those stay disabled too. This also corrects the 1.2.0
+  W-min50 entry below, which used the same wrong wording; the entry is left
+  as written because it is release history. Behaviour is unchanged.
+
 ## [1.2.0] — 2026-11-02 (tag `v1.2.0`)
 
 ### Fixed

@@ -44,7 +44,7 @@ Configure these in the Phlix admin **Plugins → Configure** dialog.
 
 | Setting | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `enabled` | bool | no | `false` | Master on/off for Last.fm scrobbling. Parsed strictly: a real bool, or a canonical boolean string (`'true'`, `'1'`, `'on'`, `'yes'` — case-insensitive) enables it; anything else, including junk strings like `'false'` and non-scalars, stays disabled. |
+| `enabled` | bool | no | `false` | Master on/off for Last.fm scrobbling. Parsed strictly: a real bool, or a canonical boolean string (`'true'`, `'1'`, `'on'`, `'yes'` — case-insensitive) enables it; the canonical false strings (`'false'`, `'0'`, `'off'`, `'no'`, `''`) disable it, and any other value — junk strings such as `'banana'`, numbers other than `1`/`0`, `null`, arrays — also stays disabled. |
 | `api_key` | string | **yes** | — | Your Last.fm API key. Create a free API account at [last.fm/api/account/create](https://www.last.fm/api/account/create). |
 | `shared_secret` | string (secret) | **yes** | — | The "Shared secret" shown next to your API key on your [Last.fm API accounts](https://www.last.fm/api/accounts) page. Used to sign authenticated requests. |
 
