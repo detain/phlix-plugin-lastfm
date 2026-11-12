@@ -37,7 +37,7 @@ final class CreateLastfmSessionsTable implements MigrationInterface
     public const NAME = 'create_lastfm_sessions';
 
     /**
-     * Run the migration using the provided Workerman MySQL connection.
+     * Apply the migration using the given Workerman MySQL connection.
      *
      * @param Connection $db Workerman MySQL connection.
      */
