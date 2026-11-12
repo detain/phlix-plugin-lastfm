@@ -104,7 +104,7 @@ final class LastfmPlugin implements LifecycleInterface, ConfigurableInterface
 
         $sessions = $this->resolveSessions($container);
         if ($sessions === null) {
-            $this->logger->warning('Last.fm plugin: LastfmSessionRepository unavailable');
+            $this->logger->warning('Last.fm plugin not enabled: session storage unavailable (no LastfmSessionRepository binding) — scrobbling stays off until the host provides it');
             return;
         }
         $resolveTrack = $this->resolveTrackResolver($container);
@@ -189,7 +189,7 @@ final class LastfmPlugin implements LifecycleInterface, ConfigurableInterface
         try {
             $sessions = $container->get(LastfmSessionRepository::class);
         } catch (\Throwable $e) {
-            $this->logger->debug('Last.fm: container lookup for sessions failed', [
+            $this->logger->debug('Last.fm session repository lookup failed', [
                 'error' => LogSafety::boundedMessage($e),
             ]);
             return null;
@@ -290,8 +290,8 @@ final class LastfmPlugin implements LifecycleInterface, ConfigurableInterface
      * replaces the vendor's insecure default context; see the reasoning
      * pinned there and in the tests.
      *
-     * If workerman/http-client is not available, falls back to a sync
-     * runner that wraps the stream-based default — callers will still
+     * If workerman/http-client is not available, uses the blocking stream
+     * fallback ({@see LastfmApi::defaultHttp()}) — callers will still
      * receive correct results but the worker will block on I/O. The stream
      * fallback verifies TLS through PHP's own stream defaults.
      *
@@ -300,7 +300,7 @@ final class LastfmPlugin implements LifecycleInterface, ConfigurableInterface
     private function createAsyncHttpRunner(): callable
     {
         if (!class_exists(\Workerman\Http\Client::class)) {
-            $this->logger->warning('Last.fm: workerman/http-client not available, using sync fallback');
+            $this->logger->warning('Last.fm async HTTP client unavailable (workerman/http-client not installed) — using blocking stream fallback');
             return LastfmApi::defaultHttp();
         }
 
@@ -400,7 +400,7 @@ final class LastfmPlugin implements LifecycleInterface, ConfigurableInterface
 
             if (!$notified) {
                 $notified = true;
-                $logger->warning('Last.fm: async HTTP dispatched outside a coroutine context — using blocking stream fallback');
+                $logger->warning('Last.fm async HTTP dispatched outside a coroutine context — using blocking stream fallback');
             }
 
             return $blocking($url, $body, $headers);

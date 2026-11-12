@@ -8,6 +8,12 @@ from git tags; the `1.2.0` tag landed on 2026-11-02.
 
 ### Fixed
 
+- Log wording: every `LastfmPlugin` log line now uses the same
+  "Last.fm <subject> …" prefix as the API and scrobbler, the missing
+  workerman/http-client degraded path is named "blocking stream fallback"
+  (matching the out-of-coroutine notice) instead of "sync fallback", and
+  the missing-session-storage warning now says in plain words that the
+  plugin is not enabled and scrobbling stays off. Behaviour is unchanged.
 - Docs: the `enabled` setting row in the README no longer calls `'false'` a
   "junk string". `'false'`, `'0'`, `'off'`, `'no'` and `''` are the canonical
   false strings — they disable the plugin by design, the same as `false`.
