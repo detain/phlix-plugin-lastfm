@@ -14,8 +14,8 @@ Connects a Phlix server to your Last.fm account:
   real time.
 - **Scrobbling** — on playback stop the plugin submits a `track.scrobble`,
   enforcing Last.fm's official rule (track longer than 30 seconds **and** more
-  than 50% *watched*) measured from where playback started on this server, so
-  resuming a half-finished track cannot credit its unwatched beginning.
+  than 50% *played*) measured from where playback started on this server, so
+  resuming a half-finished track cannot credit its unplayed beginning.
 - Connects each Phlix user to Last.fm through the **web auth** flow served by
   the host: the host performs the authorize + callback handshake and persists
   one session key per user into `lastfm_sessions`; the plugin signs

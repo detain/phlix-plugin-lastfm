@@ -241,7 +241,7 @@ class LastfmScrobbler
      * Remember where a session started (see {@see self::$startPositions}).
      *
      * A negative client offset is clamped at the source: subtracting a
-     * negative would inflate the watched time measured at stop.
+     * negative would inflate the listened time measured at stop.
      */
     private function recordStartOffset(PlaybackStarted $event): void
     {
@@ -315,7 +315,7 @@ class LastfmScrobbler
         }
 
         $duration = is_int($track['duration_seconds'] ?? null) ? $track['duration_seconds'] : null;
-        // Watched time, not playhead position: subtract where this session
+        // Listened time, not playhead position: subtract where this session
         // started. An unknown start (never recorded here) is the documented
         // zero-offset fallback.
         $startTicks = $this->startPositions[$event->sessionId . '|' . $event->mediaItemId] ?? 0;
@@ -332,7 +332,7 @@ class LastfmScrobbler
             return;
         }
 
-        // Last.fm wants the listen-start moment: anchor it to the watched
+        // Last.fm wants the listen-start moment: anchor it to the listened
         // seconds, not to the playhead position.
         $startedAt = time() - $playedSeconds;
         $outcome = $this->api->scrobble(
