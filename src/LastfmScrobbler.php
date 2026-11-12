@@ -114,7 +114,7 @@ class LastfmScrobbler
      * drop is at least loud in logs; durable offline queues are a
      * host-level concern, out of plugin scope).
      *
-     * @var list<array{user_id:string,session_key:string,track:string,artist:string,album:?string,timestamp:int,attempts:int,not_before:float}>
+     * @var list<array{user_id:string,media_item_id:string,session_key:string,track:string,artist:string,album:?string,timestamp:int,attempts:int,not_before:float}>
      */
     private array $scrobbleRetryQueue = [];
 
@@ -390,8 +390,9 @@ class LastfmScrobbler
         if ($outcome->transient) {
             $this->markPairScrobbled($pairKey);
             $this->enqueueScrobble([
-                'user_id'     => $event->userId,
-                'session_key' => $session['session_key'],
+                'user_id'       => $event->userId,
+                'media_item_id' => $event->mediaItemId,
+                'session_key'   => $session['session_key'],
                 'track'       => $title,
                 'artist'      => $artist,
                 'album'       => is_string($track['album'] ?? null) ? $track['album'] : null,
@@ -481,8 +482,7 @@ class LastfmScrobbler
             $this->logger->warning('Last.fm queued scrobble dropped after exhausting retries', [
                 'user_id'       => $job['user_id'],
                 'attempts'      => $job['attempts'],
-                'track'         => $job['track'],
-                'artist'        => $job['artist'],
+                'media_item_id' => $job['media_item_id'],
                 'max_attempts'  => self::MAX_SCROBBLE_ATTEMPTS,
             ]);
         }
@@ -492,7 +492,7 @@ class LastfmScrobbler
      * Append to the bounded queue, evicting the oldest entry (loudly) past
      * the ceiling.
      *
-     * @param array{user_id:string,session_key:string,track:string,artist:string,album:?string,timestamp:int,attempts:int,not_before:float} $job
+     * @param array{user_id:string,media_item_id:string,session_key:string,track:string,artist:string,album:?string,timestamp:int,attempts:int,not_before:float} $job
      */
     private function enqueueScrobble(array $job): void
     {

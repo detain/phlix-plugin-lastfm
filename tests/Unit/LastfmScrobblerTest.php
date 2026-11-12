@@ -587,6 +587,11 @@ final class LastfmScrobblerTest extends TestCase
         $queue = $this->readQueue($scrobbler);
         $this->assertCount(1, $queue, 'only the fresh event-1 job remains');
         $this->assertSame('Song', $queue[0]['track']);
+        $this->assertSame('m', $queue[0]['media_item_id'], 'queued job carries media_item_id');
+        $dropped = array_values(array_filter($warnings, static fn (array $w): bool => $w['message'] === 'Last.fm queued scrobble dropped after exhausting retries'));
+        $this->assertSame('m-old', $dropped[0]['context']['media_item_id']);
+        $this->assertArrayNotHasKey('track', $dropped[0]['context']);
+        $this->assertArrayNotHasKey('artist', $dropped[0]['context']);
     }
 
     /** M-05: the queue is bounded; overflow drops the OLDEST pending job, loudly. */
@@ -713,7 +718,7 @@ final class LastfmScrobblerTest extends TestCase
     }
 
     /**
-     * @param list<array{user_id:string,session_key:string,track:string,artist:string,album:?string,timestamp:int,attempts:int,not_before:float}> $jobs
+     * @param list<array{user_id:string,media_item_id:string,session_key:string,track:string,artist:string,album:?string,timestamp:int,attempts:int,not_before:float}> $jobs
      */
     private function seedQueue(LastfmScrobbler $scrobbler, array $jobs): void
     {
@@ -722,22 +727,23 @@ final class LastfmScrobblerTest extends TestCase
     }
 
     /**
-     * @return list<array{user_id:string,session_key:string,track:string,artist:string,album:?string,timestamp:int,attempts:int,not_before:float}>
+     * @return list<array{user_id:string,media_item_id:string,session_key:string,track:string,artist:string,album:?string,timestamp:int,attempts:int,not_before:float}>
      */
     private function readQueue(LastfmScrobbler $scrobbler): array
     {
-        /** @var list<array{user_id:string,session_key:string,track:string,artist:string,album:?string,timestamp:int,attempts:int,not_before:float}> $queue */
+        /** @var list<array{user_id:string,media_item_id:string,session_key:string,track:string,artist:string,album:?string,timestamp:int,attempts:int,not_before:float}> $queue */
         $queue = (new \ReflectionProperty(LastfmScrobbler::class, 'scrobbleRetryQueue'))->getValue($scrobbler);
         return $queue;
     }
 
     /**
-     * @return array{user_id:string,session_key:string,track:string,artist:string,album:?string,timestamp:int,attempts:int,not_before:float}
+     * @return array{user_id:string,media_item_id:string,session_key:string,track:string,artist:string,album:?string,timestamp:int,attempts:int,not_before:float}
      */
     private function queuedJob(string $track, int $attempts = 1, float $notBefore = 0.0, string $userId = 'u1'): array
     {
         return [
             'user_id' => $userId,
+            'media_item_id' => 'm-old',
             'session_key' => 'SK',
             'track' => $track,
             'artist' => 'Artist',
