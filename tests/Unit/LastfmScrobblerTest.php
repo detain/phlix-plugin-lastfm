@@ -496,6 +496,75 @@ final class LastfmScrobblerTest extends TestCase
         $this->assertGreaterThan(microtime(true), $queue[0]['not_before']);
     }
 
+    /**
+     * LFM-11: an absurd Retry-After (one year) on the LIVE attempt is not
+     * honoured — past LastfmApi::MAX_RETRY_AFTER_SECONDS the queued job
+     * falls back to the 60s default backoff.
+     */
+    public function testAbsurdRetryAfterOnLiveAttemptIsCappedToDefaultBackoff(): void
+    {
+        $this->sessions->method('findByUserId')->willReturn([
+            'user_id' => 'u1', 'session_key' => 'SK', 'connected_at' => '2024-01-01 00:00:00',
+        ]);
+        $this->api->expects(self::once())->method('scrobble')
+            ->willReturn(LastfmOutcome::failure(null, null, true, 31536000));
+
+        $scrobbler = $this->buildScrobbler(static fn (string $_id) => [
+            'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
+        ]);
+        $before = microtime(true);
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(101), true));
+        $after = microtime(true);
+
+        $queue = $this->readQueue($scrobbler);
+        $this->assertCount(1, $queue);
+        $this->assertGreaterThanOrEqual($before + 60.0, $queue[0]['not_before']);
+        $this->assertLessThanOrEqual($after + 60.0, $queue[0]['not_before']);
+    }
+
+    /** LFM-11: the same ceiling guards the re-queue path of the drain. */
+    public function testAbsurdRetryAfterOnReplayIsCappedToDefaultBackoff(): void
+    {
+        $this->sessions->method('findByUserId')->willReturn(null);
+        $this->api->expects(self::once())->method('scrobble')
+            ->willReturn(LastfmOutcome::failure(null, null, true, 31536000));
+
+        $scrobbler = $this->buildScrobbler(static fn (string $_id) => null);
+        $this->seedQueue($scrobbler, [$this->queuedJob('Old', 1)]);
+
+        $before = microtime(true);
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(101), true));
+        $after = microtime(true);
+
+        $queue = $this->readQueue($scrobbler);
+        $this->assertCount(1, $queue);
+        $this->assertSame(2, $queue[0]['attempts']);
+        $this->assertGreaterThanOrEqual($before + 60.0, $queue[0]['not_before']);
+        $this->assertLessThanOrEqual($after + 60.0, $queue[0]['not_before']);
+    }
+
+    /** LFM-11: a hint exactly AT the ceiling is still honoured as sent. */
+    public function testRetryAfterAtCeilingIsHonoured(): void
+    {
+        $this->sessions->method('findByUserId')->willReturn([
+            'user_id' => 'u1', 'session_key' => 'SK', 'connected_at' => '2024-01-01 00:00:00',
+        ]);
+        $this->api->expects(self::once())->method('scrobble')
+            ->willReturn(LastfmOutcome::failure(null, null, true, LastfmApi::MAX_RETRY_AFTER_SECONDS));
+
+        $scrobbler = $this->buildScrobbler(static fn (string $_id) => [
+            'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
+        ]);
+        $before = microtime(true);
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(101), true));
+        $after = microtime(true);
+
+        $queue = $this->readQueue($scrobbler);
+        $this->assertCount(1, $queue);
+        $this->assertGreaterThanOrEqual($before + 3600.0, $queue[0]['not_before']);
+        $this->assertLessThanOrEqual($after + 3600.0, $queue[0]['not_before']);
+    }
+
     /** M-05: after MAX_SCROBBLE_ATTEMPTS total tries a job is dropped with a warning. */
     public function testQueuedJobExhaustingAttemptsIsDroppedWithWarning(): void
     {

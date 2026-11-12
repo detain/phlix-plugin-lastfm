@@ -8,6 +8,12 @@ from git tags; the `1.2.0` tag landed on 2026-11-02.
 
 ### Fixed
 
+- Retry-After ceiling: a server `Retry-After` hint above
+  `LastfmApi::MAX_RETRY_AFTER_SECONDS` (3600s) is no longer honoured when a
+  transient scrobble failure is queued or re-queued — the job falls back to
+  the 60s default backoff instead of being parked for as long as the server
+  claims (e.g. `Retry-After: 31536000`). Hints at or below the ceiling are
+  honoured as before, and logs still show the raw hint the server sent.
 - Log wording: every `LastfmPlugin` log line now uses the same
   "Last.fm <subject> …" prefix as the API and scrobbler, the missing
   workerman/http-client degraded path is named "blocking stream fallback"

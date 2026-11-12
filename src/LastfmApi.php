@@ -94,6 +94,17 @@ class LastfmApi
     public const RATE_LIMIT_ENVELOPE_CODE = 29;
 
     /**
+     * Sanity ceiling (seconds) for a server-sent `Retry-After` hint. The
+     * parser below reports the hint faithfully (so logs show what the
+     * server actually said); consumers MUST NOT honour a hint above this
+     * ceiling — a misconfigured or hostile edge answering
+     * `Retry-After: 31536000` would otherwise park a queued scrobble for a
+     * year. Past the ceiling the consumer falls back to its own default
+     * backoff ({@see LastfmScrobbler} re-queue policy).
+     */
+    public const MAX_RETRY_AFTER_SECONDS = 3600;
+
+    /**
      * Byte ceiling for inbound `session_key`/`username` values, matching the
      * VARCHAR(64) columns of `lastfm_sessions`
      * (src/Database/Migrations/CreateLastfmSessionsTable.php) — oversized
@@ -528,6 +539,9 @@ class LastfmApi
      * tolerant (PSR-7 runners hand back arrays). The HTTP-date variant is
      * deliberately unsupported: Last.fm throttles with delta-seconds, and
      * silently mis-parsing a date would be worse than ignoring it.
+     * No ceiling is applied here: the value is the server's raw hint, and
+     * {@see self::MAX_RETRY_AFTER_SECONDS} is enforced where it becomes a
+     * wait.
      *
      * @param array<array-key, mixed> $headers
      */

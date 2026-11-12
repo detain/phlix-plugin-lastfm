@@ -91,7 +91,11 @@ class LastfmScrobbler
     /** Replay budget per stop event — keeps one event from blocking the worker. */
     private const MAX_DRAIN_PER_EVENT = 5;
 
-    /** Backoff applied to a re-queued job when the server sent no Retry-After. */
+    /**
+     * Backoff applied to a re-queued job when the server sent no
+     * Retry-After, and to ANY queued job whose Retry-After exceeds
+     * {@see LastfmApi::MAX_RETRY_AFTER_SECONDS}.
+     */
     private const DEFAULT_RETRY_BACKOFF_SECONDS = 60.0;
 
     /**
@@ -365,7 +369,7 @@ class LastfmScrobbler
                 'album'       => is_string($track['album'] ?? null) ? $track['album'] : null,
                 'timestamp'   => $startedAt,
                 'attempts'    => 1,
-                'not_before'  => microtime(true) + (float) ($outcome->retryAfterSeconds ?? 0),
+                'not_before'  => microtime(true) + self::retryBackoffSeconds($outcome->retryAfterSeconds, 0.0),
             ]);
             $this->logger->warning('Last.fm scrobble queued for retry', [
                 'user_id'            => $event->userId,
@@ -374,6 +378,27 @@ class LastfmScrobbler
                 'queue_size'         => count($this->scrobbleRetryQueue),
             ]);
         }
+    }
+
+    /**
+     * Seconds to wait before replaying a queued scrobble.
+     *
+     * An absent hint takes the call site's `$whenAbsent` (0 for the first
+     * queueing — replay on the next drain — and the default backoff for a
+     * re-queue). A hint above {@see LastfmApi::MAX_RETRY_AFTER_SECONDS}
+     * is not trusted: it falls back to
+     * {@see self::DEFAULT_RETRY_BACKOFF_SECONDS} instead of parking the
+     * job for as long as the server claims.
+     */
+    private static function retryBackoffSeconds(?int $retryAfterSeconds, float $whenAbsent): float
+    {
+        if ($retryAfterSeconds === null) {
+            return $whenAbsent;
+        }
+        if ($retryAfterSeconds > LastfmApi::MAX_RETRY_AFTER_SECONDS) {
+            return self::DEFAULT_RETRY_BACKOFF_SECONDS;
+        }
+        return (float) $retryAfterSeconds;
     }
 
     /**
@@ -421,7 +446,7 @@ class LastfmScrobbler
             if ($outcome->transient && $job['attempts'] < self::MAX_SCROBBLE_ATTEMPTS) {
                 $job['attempts']++;
                 $job['not_before'] = microtime(true)
-                    + (float) ($outcome->retryAfterSeconds ?? self::DEFAULT_RETRY_BACKOFF_SECONDS);
+                    + self::retryBackoffSeconds($outcome->retryAfterSeconds, self::DEFAULT_RETRY_BACKOFF_SECONDS);
                 $this->enqueueScrobble($job);
                 continue;
             }
