@@ -383,8 +383,14 @@ class LastfmApi
      * classification layer reads instead of guessing.
      *
      * The runner result is normalized here (contract: `array{status:int,
-     * body:string, headers?:array}`): a third-party runner missing keys can
-     * only degrade to a zero-status transport failure, never an explosion.
+     * body:string, headers?:array}`): a third-party runner missing keys — or
+     * one that throws instead of returning (a PSR-18 client's transport
+     * exception, a DNS error surfaced as an exception) — can only degrade to
+     * a zero-status transport failure, never an explosion. The throw is
+     * caught at this seam and mapped to the same `status: 0` shape the
+     * default runner returns on a transport error, so the classifier sees a
+     * transient failure and the caller's own containment boundary is never
+     * the first line of defence.
      *
      * @param array<string, string> $params
      *
@@ -401,8 +407,22 @@ class LastfmApi
             'User-Agent'     => 'phlix/last.fm (+https://github.com/detain/phlix-server)',
         ];
 
-        /** @var array<array-key, mixed> $raw */
-        $raw = ($this->http)(self::API_ROOT, $body, $headers);
+        try {
+            /** @var array<array-key, mixed> $raw */
+            $raw = ($this->http)(self::API_ROOT, $body, $headers);
+        } catch (\Throwable $t) {
+            // An injected runner that throws is a transport failure by
+            // another name: map it to the status-0 shape (empty body, no
+            // headers) rather than letting it escape. Context carries the
+            // exception class plus its bounded message only — the request
+            // body (api_key/sk) is never forwarded.
+            $this->logger->warning('Last.fm HTTP runner threw; treating as transport failure', [
+                'exception' => get_class($t),
+                'error'     => LogSafety::boundedMessage($t),
+                'method'    => $params['method'] ?? null,
+            ]);
+            $raw = ['status' => 0, 'body' => '', 'headers' => []];
+        }
         $status = isset($raw['status']) && is_numeric($raw['status']) ? (int) $raw['status'] : 0;
         $payload = isset($raw['body']) && is_string($raw['body']) ? $raw['body'] : '';
         if (strlen($payload) > self::MAX_RESPONSE_BYTES) {

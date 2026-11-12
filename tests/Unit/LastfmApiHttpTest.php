@@ -320,6 +320,66 @@ final class LastfmApiHttpTest extends TestCase
     }
 
     /**
+     * LFM-S13: an injected runner that THROWS (instead of returning the
+     * status-0 transport shape) degrades to that same shape at the dispatch
+     * seam — every API entry point yields a transient failure / null, never
+     * an escaped exception, and one bounded warning names the exception
+     * class without forwarding request credentials.
+     */
+    public function testThrowingRunnerDegradesToStatusZeroTransportFailure(): void
+    {
+        $warnings = [];
+        $logger = new class($warnings) extends NullLogger {
+            /** @var array<int, array{message: string, context: array<string, mixed>}> */
+            private array $warningsRef;
+
+            public function __construct(array &$warningsRef)
+            {
+                $this->warningsRef = &$warningsRef;
+            }
+
+            public function warning($message, array $context = []): void
+            {
+                $this->warningsRef[] = ['message' => $message, 'context' => $context];
+            }
+        };
+
+        $calls = 0;
+        $http = static function () use (&$calls): array {
+            $calls++;
+            throw new \RuntimeException('cURL error 6: Could not resolve host');
+        };
+
+        $api = new LastfmApi('API_KEY', 'SHARED_SECRET', $logger, $http, 0.0);
+
+        $nowPlaying = $api->updateNowPlaying('SESSION_KEY', 'Track', 'Artist');
+        $this->assertFalse($nowPlaying->success);
+        $this->assertNull($nowPlaying->errorCode);
+        $this->assertTrue($nowPlaying->transient, 'a throwing runner is a transport failure: transient');
+
+        $scrobble = $api->scrobble('SESSION_KEY', 'Track', 'Artist', null, 1700000000);
+        $this->assertFalse($scrobble->success);
+        $this->assertTrue($scrobble->transient);
+
+        $this->assertNull($api->getSession('TOKEN'));
+        $this->assertSame(3, $calls);
+
+        $thrown = array_values(array_filter(
+            $warnings,
+            static fn (array $w): bool => $w['message'] === 'Last.fm HTTP runner threw; treating as transport failure',
+        ));
+        $this->assertCount(3, $thrown);
+        $this->assertSame(\RuntimeException::class, $thrown[0]['context']['exception']);
+        $this->assertSame('cURL error 6: Could not resolve host', $thrown[0]['context']['error']);
+        $this->assertSame('track.updateNowPlaying', $thrown[0]['context']['method']);
+
+        $serialized = json_encode($warnings, JSON_THROW_ON_ERROR);
+        $this->assertStringNotContainsString('SESSION_KEY', $serialized);
+        $this->assertStringNotContainsString('API_KEY', $serialized);
+        $this->assertStringNotContainsString('SHARED_SECRET', $serialized);
+    }
+
+    /**
      * M-05 [review lastfm__srphp M-03]: transient vs terminal must be a
      * typed verdict on the outcome. Classification law: status 0
      * (transport), 429 and >=500 are transient; a 2xx error envelope with
