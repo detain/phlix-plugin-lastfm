@@ -22,7 +22,7 @@
             "default": "",
             "required": true,
             "tier": "standard",
-            "label": "Last.fm API Key",
+            "label": "Last.fm API key",
             "description": "Your Last.fm API key. Create a free API account to get one.",
             "link": "https://www.last.fm/api/account/create",
             "link_text": "Create a Last.fm API account"
@@ -33,7 +33,7 @@
             "secret": true,
             "required": true,
             "tier": "standard",
-            "label": "Last.fm Shared Secret",
+            "label": "Last.fm shared secret",
             "description": "The \"Shared secret\" shown next to your API key on your Last.fm API accounts page. Used to sign authenticated requests.",
             "link": "https://www.last.fm/api/accounts",
             "link_text": "Your Last.fm API accounts"
