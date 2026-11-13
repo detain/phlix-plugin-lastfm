@@ -11,16 +11,16 @@ declare(strict_types=1);
 
 namespace Phlix\Tests\Unit\Plugins\Scrobbler\Lastfm;
 
+use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Phlix\Plugins\Scrobbler\Lastfm\LogSafety;
 
 /**
  * The forwarded-exception-text bound (review lastfm__secaudit info).
  *
- * @covers \Phlix\Plugins\Scrobbler\Lastfm\LogSafety
- *
  * @package Phlix\Tests\Unit\Plugins\Scrobbler\Lastfm
  */
+#[CoversClass(\Phlix\Plugins\Scrobbler\Lastfm\LogSafety::class)]
 final class LogSafetyTest extends TestCase
 {
     public function testShortMessagePassesThroughUnchanged(): void

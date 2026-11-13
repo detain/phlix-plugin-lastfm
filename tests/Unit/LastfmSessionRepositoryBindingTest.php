@@ -11,6 +11,7 @@ declare(strict_types=1);
 
 namespace Phlix\Tests\Unit\Plugins\Scrobbler\Lastfm;
 
+use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Phlix\Plugins\Scrobbler\Lastfm\LastfmSessionRepository;
 use Workerman\MySQL\Connection;
@@ -21,6 +22,7 @@ use Workerman\MySQL\Connection;
  * `execute()` is captured here so the test can assert on the full
  * binding path, not just the repository's call site.
  */
+#[CoversClass(\Phlix\Plugins\Scrobbler\Lastfm\LastfmSessionRepository::class)]
 final class LastfmBindingRecorder
 {
     /** @var list<string> SQL strings handed to PDO::prepare(), in order. */
@@ -138,8 +140,6 @@ final class LastfmBindingProbeConnection extends Connection
  * never as interpolated SQL text, verified against the real
  * workerman/mysql binding path (the sibling suites mock `query()` and
  * therefore cannot see it).
- *
- * @covers \Phlix\Plugins\Scrobbler\Lastfm\LastfmSessionRepository
  *
  * @package Phlix\Tests\Unit\Plugins\Scrobbler\Lastfm
  * @since 1.2.0

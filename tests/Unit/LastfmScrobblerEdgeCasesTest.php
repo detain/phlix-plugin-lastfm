@@ -11,6 +11,8 @@ declare(strict_types=1);
 
 namespace Phlix\Tests\Unit\Plugins\Scrobbler\Lastfm;
 
+use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
+use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Phlix\Plugins\Scrobbler\Lastfm\LastfmApi;
 use Phlix\Plugins\Scrobbler\Lastfm\LastfmOutcome;
@@ -23,11 +25,11 @@ use Phlix\Shared\Events\Playback\PlaybackStopped;
 /**
  * Edge case tests for {@see LastfmScrobbler}.
  *
- * @covers \Phlix\Plugins\Scrobbler\Lastfm\LastfmScrobbler
- *
  * @package Phlix\Tests\Unit\Plugins\Scrobbler\Lastfm
  * @since 0.15.0
  */
+#[CoversClass(\Phlix\Plugins\Scrobbler\Lastfm\LastfmScrobbler::class)]
+#[AllowMockObjectsWithoutExpectations]
 final class LastfmScrobblerEdgeCasesTest extends TestCase
 {
     /** @var LastfmApi&\PHPUnit\Framework\MockObject\MockObject */

@@ -11,6 +11,8 @@ declare(strict_types=1);
 
 namespace Phlix\Tests\Unit\Plugins\Scrobbler\Lastfm;
 
+use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
+use PHPUnit\Framework\Attributes\CoversClass;
 use Phlix\Plugins\Scrobbler\Lastfm\Database\LastfmMigrationRunner;
 use PHPUnit\Framework\TestCase;
 
@@ -21,9 +23,10 @@ use PHPUnit\Framework\TestCase;
  * workers, so the migration MUST be idempotent: it uses
  * `CREATE TABLE IF NOT EXISTS`, and calling run() twice is safe.
  *
- * @covers \Phlix\Plugins\Scrobbler\Lastfm\Database\LastfmMigrationRunner
- * @covers \Phlix\Plugins\Scrobbler\Lastfm\Database\Migrations\CreateLastfmSessionsTable
  */
+#[CoversClass(\Phlix\Plugins\Scrobbler\Lastfm\Database\LastfmMigrationRunner::class)]
+#[CoversClass(\Phlix\Plugins\Scrobbler\Lastfm\Database\Migrations\CreateLastfmSessionsTable::class)]
+#[AllowMockObjectsWithoutExpectations]
 final class LastfmMigrationRunnerTest extends TestCase
 {
     public function testMigrationIsIdempotentCreateTableIfNotExists(): void

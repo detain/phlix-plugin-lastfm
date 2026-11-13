@@ -11,16 +11,17 @@ declare(strict_types=1);
 
 namespace Phlix\Tests\Unit\Plugins\Scrobbler\Lastfm;
 
+use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Phlix\Plugins\Scrobbler\Lastfm\PlaybackTicks;
 
 /**
  * The 100-ns tick unit, named exactly once.
  *
- * @covers \Phlix\Plugins\Scrobbler\Lastfm\PlaybackTicks
- *
  * @package Phlix\Tests\Unit\Plugins\Scrobbler\Lastfm
  */
+#[CoversClass(\Phlix\Plugins\Scrobbler\Lastfm\PlaybackTicks::class)]
 final class PlaybackTicksTest extends TestCase
 {
     public function testTheConversionFactorIsThePlexJellyfinTick(): void
@@ -47,9 +48,8 @@ final class PlaybackTicksTest extends TestCase
 
     /**
      * @param int $seconds
-     *
-     * @dataProvider wholeSecondRoundTripProvider
      */
+    #[DataProvider('wholeSecondRoundTripProvider')]
     public function testWholeSecondsRoundTripExactly(int $seconds): void
     {
         $this->assertSame($seconds, PlaybackTicks::toSeconds(PlaybackTicks::fromSeconds($seconds)));

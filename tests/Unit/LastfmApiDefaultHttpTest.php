@@ -11,6 +11,7 @@ declare(strict_types=1);
 
 namespace Phlix\Tests\Unit\Plugins\Scrobbler\Lastfm;
 
+use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Phlix\Plugins\Scrobbler\Lastfm\LastfmApi;
 use Phlix\Plugins\Scrobbler\Lastfm\LastfmPlugin;
@@ -28,11 +29,10 @@ use Phlix\Plugins\Scrobbler\Lastfm\LastfmPlugin;
  * a one-shot child process while the test process serves the socket: the two
  * halves of a synchronous HTTP exchange cannot share one thread.
  *
- * @covers \Phlix\Plugins\Scrobbler\Lastfm\LastfmApi
- *
  * @package Phlix\Tests\Unit\Plugins\Scrobbler\Lastfm
  * @since 0.15.0
  */
+#[CoversClass(\Phlix\Plugins\Scrobbler\Lastfm\LastfmApi::class)]
 final class LastfmApiDefaultHttpTest extends TestCase
 {
     /**

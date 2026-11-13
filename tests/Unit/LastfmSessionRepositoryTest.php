@@ -11,6 +11,8 @@ declare(strict_types=1);
 
 namespace Phlix\Tests\Unit\Plugins\Scrobbler\Lastfm;
 
+use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
+use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Phlix\Plugins\Scrobbler\Lastfm\LastfmSessionRepository;
 use Workerman\MySQL\Connection;
@@ -18,11 +20,11 @@ use Workerman\MySQL\Connection;
 /**
  * Unit tests for {@see LastfmSessionRepository}.
  *
- * @covers \Phlix\Plugins\Scrobbler\Lastfm\LastfmSessionRepository
- *
  * @package Phlix\Tests\Unit\Plugins\Scrobbler\Lastfm
  * @since 0.15.0
  */
+#[CoversClass(\Phlix\Plugins\Scrobbler\Lastfm\LastfmSessionRepository::class)]
+#[AllowMockObjectsWithoutExpectations]
 final class LastfmSessionRepositoryTest extends TestCase
 {
     /** @var Connection&\PHPUnit\Framework\MockObject\MockObject */

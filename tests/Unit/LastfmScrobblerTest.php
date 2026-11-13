@@ -11,6 +11,8 @@ declare(strict_types=1);
 
 namespace Phlix\Tests\Unit\Plugins\Scrobbler\Lastfm;
 
+use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
+use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Phlix\Plugins\Scrobbler\Lastfm\LastfmApi;
 use Phlix\Plugins\Scrobbler\Lastfm\LastfmOutcome;
@@ -25,11 +27,11 @@ use Psr\Log\NullLogger;
 /**
  * Unit tests for {@see LastfmScrobbler}.
  *
- * @covers \Phlix\Plugins\Scrobbler\Lastfm\LastfmScrobbler
- *
  * @package Phlix\Tests\Unit\Plugins\Scrobbler\Lastfm
  * @since 0.15.0
  */
+#[CoversClass(\Phlix\Plugins\Scrobbler\Lastfm\LastfmScrobbler::class)]
+#[AllowMockObjectsWithoutExpectations]
 final class LastfmScrobblerTest extends TestCase
 {
     /** @var LastfmApi&\PHPUnit\Framework\MockObject\MockObject */
@@ -113,7 +115,7 @@ final class LastfmScrobblerTest extends TestCase
         $playedSeconds = 101; // > 50% of 200s
         $this->api->expects(self::once())
             ->method('scrobble')
-            ->with('SK', 'Song', 'Artist', null, self::isType('integer'))
+            ->with('SK', 'Song', 'Artist', null, self::isInt())
             ->willReturn(LastfmOutcome::success());
 
         $scrobbler = $this->buildScrobbler(static fn (string $_id) => [

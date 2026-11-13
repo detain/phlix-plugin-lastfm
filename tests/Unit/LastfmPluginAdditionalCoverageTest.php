@@ -11,6 +11,8 @@ declare(strict_types=1);
 
 namespace Phlix\Tests\Unit\Plugins\Scrobbler\Lastfm;
 
+use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
+use PHPUnit\Framework\Attributes\CoversClass;
 use Phlix\Plugins\Scrobbler\Lastfm\LastfmApi;
 use Phlix\Plugins\Scrobbler\Lastfm\LastfmOutcome;
 use Phlix\Plugins\Scrobbler\Lastfm\LastfmPlugin;
@@ -25,11 +27,11 @@ use Psr\Container\NotFoundExceptionInterface;
 /**
  * Additional coverage tests for {@see LastfmPlugin} to cover uncovered branches.
  *
- * @covers \Phlix\Plugins\Scrobbler\Lastfm\LastfmPlugin
- *
  * @package Phlix\Tests\Unit\Plugins\Scrobbler\Lastfm
  * @since 0.15.0
  */
+#[CoversClass(\Phlix\Plugins\Scrobbler\Lastfm\LastfmPlugin::class)]
+#[AllowMockObjectsWithoutExpectations]
 final class LastfmPluginAdditionalCoverageTest extends TestCase
 {
     /**

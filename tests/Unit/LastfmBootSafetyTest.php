@@ -11,6 +11,8 @@ declare(strict_types=1);
 
 namespace Phlix\Tests\Unit\Plugins\Scrobbler\Lastfm;
 
+use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
+use PHPUnit\Framework\Attributes\CoversClass;
 use Phlix\Plugins\Scrobbler\Lastfm\Database\LastfmMigrationRunner;
 use Phlix\Plugins\Scrobbler\Lastfm\LastfmApi;
 use Phlix\Plugins\Scrobbler\Lastfm\LastfmPlugin;
@@ -33,9 +35,10 @@ use ReflectionObject;
  *  - a scrobble drives the async workerman/http-client via the canonical
  *    cooperative-wait runner (not a blocking runner).
  *
- * @covers \Phlix\Plugins\Scrobbler\Lastfm\LastfmPlugin
- * @covers \Phlix\Plugins\Scrobbler\Lastfm\LastfmScrobbler
  */
+#[CoversClass(\Phlix\Plugins\Scrobbler\Lastfm\LastfmPlugin::class)]
+#[CoversClass(\Phlix\Plugins\Scrobbler\Lastfm\LastfmScrobbler::class)]
+#[AllowMockObjectsWithoutExpectations]
 final class LastfmBootSafetyTest extends TestCase
 {
     /**

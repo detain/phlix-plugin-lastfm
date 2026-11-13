@@ -11,6 +11,7 @@ declare(strict_types=1);
 
 namespace Phlix\Tests\Unit\Plugins\Scrobbler\Lastfm;
 
+use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Phlix\Plugins\Scrobbler\Lastfm\LastfmApi;
 use Phlix\Plugins\Scrobbler\Lastfm\LogSafety;
@@ -18,11 +19,10 @@ use Phlix\Plugins\Scrobbler\Lastfm\LogSafety;
 /**
  * Unit tests for {@see LastfmApi}.
  *
- * @covers \Phlix\Plugins\Scrobbler\Lastfm\LastfmApi
- *
  * @package Phlix\Tests\Unit\Plugins\Scrobbler\Lastfm
  * @since 0.15.0
  */
+#[CoversClass(\Phlix\Plugins\Scrobbler\Lastfm\LastfmApi::class)]
 final class LastfmApiTest extends TestCase
 {
     /**

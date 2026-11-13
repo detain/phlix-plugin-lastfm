@@ -11,17 +11,17 @@ declare(strict_types=1);
 
 namespace Phlix\Tests\Unit\Plugins\Scrobbler\Lastfm;
 
+use PHPUnit\Framework\Attributes\CoversClass;
 use Phlix\Plugins\Scrobbler\Lastfm\LastfmConfig;
 use PHPUnit\Framework\TestCase;
 
 /**
  * Unit tests for {@see LastfmConfig}.
  *
- * @covers \Phlix\Plugins\Scrobbler\Lastfm\LastfmConfig
- *
  * @package Phlix\Tests\Unit\Plugins\Scrobbler\Lastfm
  * @since 0.15.0
  */
+#[CoversClass(\Phlix\Plugins\Scrobbler\Lastfm\LastfmConfig::class)]
 final class LastfmConfigTest extends TestCase
 {
     public function testConstructorSetsProperties(): void

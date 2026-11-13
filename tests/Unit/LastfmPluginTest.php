@@ -11,6 +11,8 @@ declare(strict_types=1);
 
 namespace Phlix\Tests\Unit\Plugins\Scrobbler\Lastfm;
 
+use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
+use PHPUnit\Framework\Attributes\CoversClass;
 use Phlix\Media\Library\ItemRepository;
 use Phlix\Plugins\Scrobbler\Lastfm\LastfmApi;
 use Phlix\Plugins\Scrobbler\Lastfm\LastfmConfig;
@@ -27,11 +29,11 @@ use Psr\Log\LoggerInterface;
 /**
  * Additional unit tests for {@see LastfmPlugin}.
  *
- * @covers \Phlix\Plugins\Scrobbler\Lastfm\LastfmPlugin
- *
  * @package Phlix\Tests\Unit\Plugins\Scrobbler\Lastfm
  * @since 0.15.0
  */
+#[CoversClass(\Phlix\Plugins\Scrobbler\Lastfm\LastfmPlugin::class)]
+#[AllowMockObjectsWithoutExpectations]
 final class LastfmPluginTest extends TestCase
 {
     public function testGetPluginTypeReturnsCorrectType(): void

@@ -11,6 +11,7 @@ declare(strict_types=1);
 
 namespace Phlix\Tests\Unit\Plugins\Scrobbler\Lastfm;
 
+use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Phlix\Plugins\Scrobbler\Lastfm\LastfmApi;
 use Psr\Log\LoggerInterface;
@@ -24,11 +25,10 @@ use Psr\Log\NullLogger;
  * 2. Non-2xx responses are surfaced as warning logs, not silent nulls.
  * 3. Transport errors result in a distinguishable zero-status response.
  *
- * @covers \Phlix\Plugins\Scrobbler\Lastfm\LastfmApi
- *
  * @package Phlix\Tests\Unit\Plugins\Scrobbler\Lastfm
  * @since 0.15.0
  */
+#[CoversClass(\Phlix\Plugins\Scrobbler\Lastfm\LastfmApi::class)]
 final class LastfmApiHttpTest extends TestCase
 {
     public function testHttpRunnerReceivesCorrectUrlBodyAndHeaders(): void

@@ -7,6 +7,7 @@ from git tags; the `1.2.0` tag landed on 2026-11-02.
 ## [Unreleased]
 
 ### Changed
+- Dependencies: dev toolchain upgraded to phpunit 10.5 -> 12.5.44 (PHP floor stays >=8.3; PHPUnit 12 needs 8.3), phpstan 2.3.1 -> 2.3.5, workerman 5.2.4 / coroutine 1.1.7. `detain/phlix-shared` pin (^0.54.0) intentionally unchanged. Tests migrated to PHPUnit 12 attributes (`#[CoversClass]`, `#[DataProvider]`, `#[AllowMockObjectsWithoutExpectations]`); GitHub Actions already on current majors.
 - Audit gate (MAL-17): `scripts/security-audit-check.php` messages no longer print the slash-stem plurals "advisory/ies" / "repository/ies"; they pluralise correctly (1 advisory, 2 advisories). Estate family wave; test mirrors updated in lockstep.
 
 ### Fixed

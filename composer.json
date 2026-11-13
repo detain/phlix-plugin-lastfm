@@ -17,8 +17,8 @@
         "workerman/http-client": "Async HTTP client for Workerman — use with LastfmPlugin to avoid blocking file_get_contents on scrobble/now-playing calls."
     },
     "require-dev": {
-        "phpstan/phpstan": "^2.2",
-        "phpunit/phpunit": "^10.0",
+        "phpstan/phpstan": "^2.3.5",
+        "phpunit/phpunit": "^12.5",
         "react/promise": "^3.3",
         "workerman/http-client": "^3.1"
     },
