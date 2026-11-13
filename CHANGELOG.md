@@ -6,6 +6,9 @@ from git tags; the `1.2.0` tag landed on 2026-11-02.
 
 ## [Unreleased]
 
+### Changed
+- Audit gate (MAL-17): `scripts/security-audit-check.php` messages no longer print the slash-stem plurals "advisory/ies" / "repository/ies"; they pluralise correctly (1 advisory, 2 advisories). Estate family wave; test mirrors updated in lockstep.
+
 ### Fixed
 
 - Retry-job logs: the exhausted-retries warning logs `media_item_id` instead of free-text track/artist, and queued jobs now carry `media_item_id`.
