@@ -293,6 +293,46 @@ final class LastfmScrobblerEdgeCasesTest extends TestCase
     }
 
     /**
+     * LFM-S2: a TRANSIENT live failure marks the pair as handled, enqueues
+     * the submission exactly once, and a repeat stop for the pair neither
+     * re-submits live nor duplicates the queue entry (the queued job is not
+     * yet due — Retry-After 30s).
+     */
+    public function testTransientFailureMarksPairEnqueuesOnceAndRepeatStopDoesNotResubmit(): void
+    {
+        $this->sessions->method('findByUserId')->willReturn([
+            'user_id' => 'u1', 'session_key' => 'SK', 'connected_at' => '2024-01-01 00:00:00',
+        ]);
+        $this->api->method('updateNowPlaying')->willReturn(LastfmOutcome::success());
+        $this->api->expects(self::once())->method('scrobble')
+            ->willReturn(LastfmOutcome::failure(null, null, true, 30));
+
+        $scrobbler = $this->buildScrobbler(static fn (string $_id) => [
+            'title' => 'Song', 'artist' => 'Artist', 'album' => null, 'duration_seconds' => 200,
+        ]);
+
+        $scrobbler->onPlaybackStarted(new PlaybackStarted('s', 'u1', 'm', 'd', 0));
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(150), false));
+
+        $this->assertCount(1, $this->readProperty($scrobbler, 'scrobbleRetryQueue'), 'enqueued once');
+        $this->assertArrayHasKey('s|m', $this->readProperty($scrobbler, 'scrobbledPairs'), 'pair marked');
+
+        $scrobbler->onPlaybackStopped(new PlaybackStopped('s', 'u1', 'm', 'd', PlaybackTicks::fromSeconds(200), true));
+
+        $this->assertCount(1, $this->readProperty($scrobbler, 'scrobbleRetryQueue'), 'repeat stop does not re-enqueue');
+    }
+
+    /**
+     * @return array<array-key, mixed>
+     */
+    private function readProperty(LastfmScrobbler $scrobbler, string $name): array
+    {
+        /** @var array<array-key, mixed> $value */
+        $value = (new \ReflectionProperty(LastfmScrobbler::class, $name))->getValue($scrobbler);
+        return $value;
+    }
+
+    /**
      * A rewound stop (final position before the remembered start — client
      * quirk or clock weirdness) clamps to zero watched time instead of
      * producing a negative duration or a bogus back-dated timestamp.

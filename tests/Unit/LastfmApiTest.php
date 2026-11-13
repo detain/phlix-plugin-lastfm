@@ -13,6 +13,7 @@ namespace Phlix\Tests\Unit\Plugins\Scrobbler\Lastfm;
 
 use PHPUnit\Framework\TestCase;
 use Phlix\Plugins\Scrobbler\Lastfm\LastfmApi;
+use Phlix\Plugins\Scrobbler\Lastfm\LogSafety;
 
 /**
  * Unit tests for {@see LastfmApi}.
@@ -215,6 +216,51 @@ final class LastfmApiTest extends TestCase
         // The reason must reach the log line the scrobbler emits (M-04 wiring):
         $this->assertArrayHasKey('ignore_reason', $outcome->logContext());
         $this->assertSame('banned', $outcome->logContext()['ignore_reason']);
+    }
+
+    /**
+     * LFM-S4: an oversize, control-character-laden envelope message and
+     * ignore reason arriving through the API seam reach the outcome and its
+     * log context scrubbed and bounded.
+     */
+    public function testOversizeControlCharEnvelopeMessageIsScrubbedAtTheApiSeam(): void
+    {
+        $hostile = "bad\r\nINJECTED line\x00\x07" . str_repeat('x', 1000) . 'TAIL-MUST-NOT-SURVIVE';
+        $api = $this->apiWith(200, (string) json_encode(['error' => 6, 'message' => $hostile]));
+
+        $outcome = $api->scrobble('SK', 'Song', 'Artist', null, 1700000000);
+
+        $this->assertFalse($outcome->success);
+        $message = (string) $outcome->errorMessage;
+        $this->assertDoesNotMatchRegularExpression('/[\x00-\x1F\x7F]/', $message);
+        $this->assertStringStartsWith('bad  INJECTED line', $message);
+        $this->assertStringNotContainsString('TAIL-MUST-NOT-SURVIVE', $message);
+        $this->assertStringContainsString('truncated', $message);
+        $this->assertLessThanOrEqual(
+            LogSafety::MAX_RESPONSE_STRING_BYTES + LogSafety::MAX_MARKER_BYTES,
+            strlen($message),
+        );
+        $this->assertSame($message, $outcome->logContext()['error_message']);
+    }
+
+    public function testOversizeControlCharIgnoreReasonIsScrubbedAtTheApiSeam(): void
+    {
+        $hostile = "dup\nlicate\x1B[31m" . str_repeat('y', 1000) . 'TAIL-MUST-NOT-SURVIVE';
+        $api = $this->apiWith(200, (string) json_encode([
+            'scrobbles' => [
+                '@attr' => ['accepted' => '0', 'ignored' => '1'],
+                'scrobble' => ['ignore' => ['@attr' => ['reason' => $hostile]]],
+            ],
+        ]));
+
+        $outcome = $api->scrobble('SK', 'Song', 'Artist', null, 1700000000);
+
+        $reason = (string) $outcome->ignoreReason;
+        $this->assertDoesNotMatchRegularExpression('/[\x00-\x1F\x7F]/', $reason);
+        $this->assertStringStartsWith('dup licate', $reason);
+        $this->assertStringNotContainsString('TAIL-MUST-NOT-SURVIVE', $reason);
+        $this->assertStringContainsString('truncated', $reason);
+        $this->assertSame($reason, $outcome->logContext()['ignore_reason']);
     }
 
     /** The @attr-accepted twin: accepted=1/ignored=0 keeps the success verdict. */
